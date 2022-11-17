@@ -22,7 +22,7 @@ namespace TabTabGo.Templating.Liquid
         private static bool _isIinitialized = false;
         private readonly Dictionary<int, Dictionary<object, object>> _hashCache = new Dictionary<int, Dictionary<object, object>>();
         private static readonly Dictionary<string, Template> _templateCache = new Dictionary<string, Template>();
-
+        public override string EngineName => "Liquid";
         public void Initialize()
         {
             lock (_lock)
@@ -75,9 +75,11 @@ namespace TabTabGo.Templating.Liquid
             var hash = HashIt(sourceData);
 
             Template.FileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
-            var parameters = new RenderParameters(new CultureInfo(culture));
-            parameters.LocalVariables = Hash.FromDictionary(hash);
-            
+            var parameters = new RenderParameters(new CultureInfo(culture))
+            {
+                LocalVariables = Hash.FromDictionary(hash)
+            };
+
             var result = _templateCache[templatePath].Render(parameters);
 
             return result;

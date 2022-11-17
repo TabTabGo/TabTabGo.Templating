@@ -21,8 +21,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         private const string VALUE_FORMAT = ":#";
 
         private WorkbookPart CurrentWorkbookPart { get; set; }
-
-        //ToDo: add implementation with cache capablities
+        public override string EngineName => "OpenXml";
+        //ToDo: add implementation with cache capabilities
         public override bool IsCached(string templatePath)
         {
             //no caching is implemented
@@ -31,7 +31,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         public override void ParseTemplate(string templatePath)
         {
-            //no parsing impelemted 
+            //no parsing implemented 
         }
 
         public override void RegisterFilter(Type type)

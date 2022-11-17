@@ -8,6 +8,7 @@ namespace TabTabGo.Templating
 {
     public abstract class TemplatingEngine
     {
+        public abstract string EngineName { get; }
         public abstract bool IsCached(string templatePath);
         public abstract void ParseTemplate(string templatePath);
         public abstract object Render(string templatePath, object sourceData, string culture = "en-Us");
