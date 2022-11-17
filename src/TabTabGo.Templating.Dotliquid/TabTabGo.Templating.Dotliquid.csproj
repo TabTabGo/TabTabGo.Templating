@@ -1,0 +1,42 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Version>$(VersionSuffix)</Version>
+    <Copyright>Copyright 2022</Copyright>
+    <PackageTags>Templating</PackageTags>
+    <Description>DotLiquid's implementation of TabTabGo's Templating engine</Description>
+    <Company>TabTabGo</Company>
+    <Authors>TabTabGo</Authors>
+    <LangVersion>default</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TabTabGo.Templating.Liquid</RootNamespace>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageVersion>6.0.0</PackageVersion>
+    <PackageIcon>logo@32.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DotLiquid" Version="2.2.656" />
+    <PackageReference Include="Joelharkes.DocumentFormat.OpenXml" Version="2.7.1" />
+    <PackageReference Include="System.Linq.Dynamic.Core" Version="1.1.2" />
+    <PackageReference Include="TabTabGo.Core" Version="6.0.6.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Xml.XPath" Version="4.3.0" />
+    <PackageReference Include="System.Linq.Dynamic.Core" Version="1.2.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TabTabGo.Templating\TabTabGo.Templating.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\logo@32.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+      <Link>logo@32.png</Link>
+    </None>
+  </ItemGroup>
+
+</Project>

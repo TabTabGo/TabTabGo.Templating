@@ -1,0 +1,17 @@
+﻿[
+  {
+    "type": "A",
+    "item": "item1",
+    "value": "value1"
+  },
+  {
+    "type": "B",
+    "item": "item2",
+    "value": "value2"
+  },
+  {
+    "type": "B",
+    "item": "item3",
+    "value": "value3"
+  }
+]

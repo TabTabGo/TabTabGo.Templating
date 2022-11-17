@@ -1,0 +1,8 @@
+﻿{
+  "stringValue": "a string",
+  "boolValue": true,
+  "object": {
+    "IsNested": true,
+    "Name":  "test"
+  }
+}

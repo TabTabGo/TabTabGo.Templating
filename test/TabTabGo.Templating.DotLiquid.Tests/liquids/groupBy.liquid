@@ -1,0 +1,2 @@
+﻿
+{% assign groups = data | GroupBy:'type' %}{% for group in groups %}{% for item in group.Items %}Group: {{group.Key}} Item: {{item.item}}{% endfor %}{% endfor %}

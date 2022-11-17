@@ -1,0 +1,95 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>    
+    <TargetFramework>net6.0</TargetFramework>    
+    <LangVersion>default</LangVersion>    
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="json\division.json" />
+    <None Remove="json\match.json" />
+    <None Remove="json\number.json" />
+    <None Remove="json\numbers.json" />
+    <None Remove="liquids\division.liquid" />
+    <None Remove="liquids\match.liquid" />
+    <None Remove="liquids\number-ae.liquid" />
+    <None Remove="liquids\number.liquid" />
+    <None Remove="liquids\numbers.liquid" />
+    <None Remove="reconciliation\json\expected_atlantis_ni_01.json" />
+    <None Remove="reconciliation\json\expected_ni_01.json" />
+    <None Remove="reconciliation\liquid\report\_bootstrap.liquid" />
+    <None Remove="reconciliation\liquid\report\_chartjs.liquid" />
+    <None Remove="reconciliation\liquid\report\_commonStyling.liquid" />
+    <None Remove="reconciliation\liquid\report\_matchTable.liquid" />
+    <None Remove="reconciliation\liquid\report\_reportStyling.liquid" />
+    <None Remove="reconciliation\liquid\report\_showchart.liquid" />
+    <None Remove="reconciliation\liquid\report\_unmatchedTable.liquid" />
+    <None Update="liquids\biDi.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="json\biDi-in-between.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="json\dates.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="liquids\offsetDate.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="json\biDi.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="json\match.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="json\division.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="json\numbers.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="json\number.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="liquids\match.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="liquids\division.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="liquids\numbers.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="liquids\number-ae.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="liquids\number.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="16.8.3" />
+    <PackageReference Include="xunit" Version="2.4.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.4.3">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="MSTest.TestFramework" Version="2.1.2" />
+    <PackageReference Include="MSTest.TestAdapter" Version="2.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TabTabGo.Templating.Dotliquid\TabTabGo.Templating.Dotliquid.csproj" />
+    <ProjectReference Include="..\..\src\TabTabGo.Templating\TabTabGo.Templating.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Service Include="{82a7f48d-3b50-4b1e-b82e-3ada8210c358}" />
+  </ItemGroup>
+
+</Project>

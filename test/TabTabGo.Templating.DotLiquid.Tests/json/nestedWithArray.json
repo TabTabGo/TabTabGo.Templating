@@ -1,0 +1,18 @@
+﻿{
+  "stringValue": "a string",
+  "boolValue": true,
+  "object": {
+    "IsNested": true,
+    "Name": "test",
+    "NestedArray": [
+      {
+        "item": "item1",
+        "value": "value1"
+      },
+      {
+        "item": "item2",
+        "value": "value2"
+      }
+    ]
+  }
+}

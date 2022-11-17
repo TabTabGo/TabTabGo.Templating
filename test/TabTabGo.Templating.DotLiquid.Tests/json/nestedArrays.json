@@ -1,0 +1,20 @@
+﻿[
+  {
+    "item": "item1",
+    "value": "value1",
+    "values": [
+      {
+        "item": "nestedItem1",
+        "value": "nestedValue1"
+      },
+      {
+        "item": "nestedItem2",
+        "value": "nestedValue2"
+      }
+    ]
+  },
+  {
+    "item": "item2",
+    "value": "value2"
+  }
+]

@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <Version>$(VersionSuffix)</Version>
+    <Company>TabTabGo</Company>
+    <Authors>TabTabGo</Authors>
+    <Description>Abstract implementation of TabTabGo's Templeting Engine</Description>
+    <Copyright>Copyright 2022</Copyright>
+    <LangVersion>default</LangVersion>
+    <Nullable>enable</Nullable>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageVersion>6.0.0</PackageVersion>
+    <PackageIcon>logo@32.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Common.Logging.Core" Version="3.4.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <PackageReference Include="TabTabGo.Core" Version="6.0.6.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\logo@32.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
+      <Link>logo@32.png</Link>
+    </None>
+  </ItemGroup>
+</Project>

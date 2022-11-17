@@ -1,0 +1,243 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+    <style>
+        p.break-before {
+            page-break-before: always;
+        }
+        @page {
+            size: 8.27in 11.69in;
+            /* this affects the margin in the printer settings */
+            margin: 0;
+        }
+
+        @media print {
+            body {
+                /* this affects the margin on the content before sending to printer */
+                margin: 20mm 10mm 20mm 10mm;
+                font-family: 'Calibri';
+                font-size: 20pt;
+                border: 0;
+            }
+        }
+
+        @media screen {
+            body {
+                /* this affects the margin on the content before sending to printer */
+                margin: 0;
+                font-family: 'Calibri';
+                font-size: 20pt;
+                border: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <table style="width: 100%;">
+            <tr>
+                <td style="white-space: nowrap;">
+                    <strong>Invoice Number</strong>
+                </td>
+                <td><span style="margin-left: 14px;">:</span></td>
+                <td style="white-space: nowrap;"><span style="margin-left: 14px;">{{data.referenceId}}</span></td>
+
+                <td style="width: 100%"></td>
+
+                <td style="white-space: nowrap; text-align: right;"><span style="margin-right: 14px;">{رقم الفاتورة هنا}</span></td>
+                <td><span style="margin-left: 14px; text-align: right;">:</span></td>
+
+                <td style="white-space: nowrap; text-align: right;">
+                    <strong>رقم الفاتورة</strong>
+                </td>
+            </tr>
+            <tr>
+                <td style="white-space: nowrap;">Boutique Reference
+                </td>
+                <td style="white-space: nowrap;"><span style="margin-left: 14px;">:</span></td>
+                <td style="white-space: nowrap;"><span style="margin-left: 14px;">{{data.data.BTQ_REF.value}}</span></td>
+
+                <td style="width: 100%"></td>
+
+                <td style="white-space: nowrap; text-align: right;"><span style="margin-right: 14px;">{{data.data.BTQ_REF.translation}}</span></td>
+                <td><span style="margin-left: 14px; text-align: right;">:</span></td>
+
+                <td style="white-space: nowrap; text-align: right;">مرجع البوتيك
+                </td>
+            </tr>
+            <tr>
+                <td style="white-space: nowrap;">Sales Person
+                </td>
+                <td><span style="margin-left: 14px;">:</span></td>
+                <td style="white-space: nowrap;"><span style="margin-left: 14px;">{{data.data.SALES_REP.value}}</span></td>
+
+                <td style="width: 100%"></td>
+
+                <td style="white-space: nowrap; text-align: right;"><span style="margin-right: 14px;">{{data.data.SALES_REP.translation}}</span></td>
+                <td><span style="margin-left: 14px; text-align: right;">:</span></td>
+
+                <td style="white-space: nowrap; text-align: right;">مندوب المبيعات
+                </td>
+            </tr>
+            <tr>
+                <td>{{data.data.SALES_DATE}}
+                </td>
+                <td style="width: 100%; text-align: right;" colspan="6">
+                    <div style="direction: rtl;">
+                        <span>01 </span><span>يونيو </span><span>2016 </span>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="7">
+                    <br />
+                </td>
+            </tr>
+            <tr>
+                <td style="white-space: nowrap;">Customer Code
+                </td>
+                <td style="white-space: nowrap;"><span style="margin-left: 14px;">:</span></td>
+                <td style="white-space: nowrap;"><span style="margin-left: 14px;">{customer code goes here}</span></td>
+
+                <td style="width: 100%"></td>
+
+                <td style="white-space: nowrap; text-align: right;"><span style="margin-right: 14px;">{رقم الزبون هنا}</span></td>
+                <td><span style="margin-left: 14px; text-align: right;">:</span></td>
+
+                <td style="white-space: nowrap; text-align: right;">رقم الزبون
+                </td>
+            </tr>
+            <tr>
+                <td colspan="7">
+                    <br />
+                </td>
+            </tr>
+            <tr>
+                <td colspan="3">Mr. Ali Saeed  Al Bwardy
+                    <br />
+                    88
+                    <br />
+                    Dubai
+                </td>
+                <td style="width: 100%; text-align: right;" colspan="4">
+                    <div style="direction: rtl;">
+                        Mr. Ali Saeed  Al Bwardy
+                    <br />
+                        88
+                    <br />
+                        Dubai
+                    </div>
+                </td>
+            </tr>
+        </table>
+        <br />
+        <table style="width: 100%;">
+            <thead>
+                <tr>
+                    <th style="width: 20%; text-align: left;">Sale Price \ السعر</th>
+                    <th style="width: 20%; text-align: right;">Quantity \ العدد</th>
+                    <th style="width: 60%; text-align: right;">Description \ وصف المنتج
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="text-align: left; padding-top: 6px; padding-bottom: 6px;">3,000.00</td>
+                    <td style="text-align: right; padding-top: 6px; padding-bottom: 6px;">1</td>
+                    <td style="text-align: right; padding-top: 16px; padding-bottom: 16px;">
+                        <div>
+                            PENDANT MAIN DE FATIMA WHITE GOLD
+                                        <br />
+                            Reference: B3037300 / Engraved Number: TEST123
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="text-align: left; padding-top: 6px; padding-bottom: 6px;">3,000.00</td>
+                    <td style="text-align: right; padding-top: 6px; padding-bottom: 6px;">1</td>
+                    <td style="text-align: right; padding-top: 16px; padding-bottom: 16px;">
+                        <div>
+                            BAIGNOIRE LM RH WGS GOLD BRAC MANUAL MVT
+                                        <br />
+                            Reference: WB520010 / Engraved Number: TEST456
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="text-align: left; padding-top: 12px; padding-bottom: 12px;">3,000.00</td>
+                    <td style="text-align: right; padding-top: 6px; padding-bottom: 6px;">1</td>
+                    <td style="text-align: right; padding-top: 16px; padding-bottom: 16px;">
+                        <div>
+                            BB CHRONO STL& LTHR BLCK DIAL(W6920079)
+                                        <br />
+                            Reference: W6920079 
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td style="text-align: left; padding-top: 6px; padding-bottom: 6px;"><strong>9,000.00</strong></td>
+                    <td style="text-align: right; padding-top: 6px; padding-bottom: 6px;"><strong>3</strong></td>
+                    <td style="text-align: center; padding-top: 12px; padding-bottom: 12px;">
+                        <strong>Total \ المجموع</strong>
+                    </td>
+                </tr>
+            </tfoot>
+        </table>
+        <br />
+        <br />
+        <table style="width: 100%;">
+            <tr>
+                <td style="vertical-align:top; text-align: left;">
+                    100,000.00<br />
+                    15,000.00<br />
+                    20,000.00<br />
+                    29,500.00
+                </td>
+                <td style="vertical-align:top; width: 100%; text-align: right; padding-right: 15px;">
+                    <br />
+                    <br />
+                    <br />
+                    12345
+                </td>
+                <td style="vertical-align:top; text-align: right; white-space: nowrap; padding-left:5px; padding-right: 15px;">
+                    Cash AED<br />
+                    Amex<br />
+                    Mastercard<br />
+                    Credit transfer
+                </td>
+                <td style="vertical-align:top; text-align: right; white-space: nowrap; padding-right:15px; padding-left: 15px;">
+                    نقدا بالدرهم<br />
+                    اميكس<br />
+                    ماستركارد<br />
+                    تحويل الرصيد
+                </td>
+                <td style="vertical-align:top; text-align: right; white-space: nowrap;">
+                    <strong>وسائل الدفع</strong>
+                    <br />
+                    <strong>(Modes of payment)</strong>
+                </td>
+            </tr>
+        </table>
+        <br />
+        <br />
+        <br />
+        <br />
+        <div>
+            <div style="float: right;">
+                ................................................................. (Signature) التوقيع
+            </div>
+            <div style="float: left;">
+               Print on 22/11/2016 11:32:43 طبع في
+            </div>
+        </div>
+    </div>
+</body>
+</html>

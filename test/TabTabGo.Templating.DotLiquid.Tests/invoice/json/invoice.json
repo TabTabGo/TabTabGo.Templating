@@ -1,0 +1,255 @@
+{
+  "brand": {
+    "code": "CAR",
+    "name": null
+  },
+  "documentType": "NSI_INV",
+  "referenceId": "6149606",
+  "data": {
+    "PRT_NAME": {
+      "value": "QPRINT",
+      "translate": false,
+      "translation": "QPRINT"
+    },
+    "NO_OF_COPY": {
+      "value": "3",
+      "translate": false,
+      "translation": "3"
+    },
+    "DOC_TYPE": {
+      "value": "CUSTOMER COPY",
+      "translate": false,
+      "translation": "CUSTOMER COPY"
+    },
+    "DOC_NUMBER": [
+      {
+        "value": "6149606",
+        "translate": false,
+        "translation": "6149606"
+      }
+    ],
+    "BTQ_REF": {
+      "value": "061/183",
+      "translate": false,
+      "translation": "061/183"
+    },
+    "SALE_REP": {
+      "value": "Liuba Pulvermann",
+      "translate": false,
+      "translation": "Liuba Pulvermann"
+    },
+    "SALE_DATE": {
+      "value": "01 June 2015",
+      "translate": false,
+      "translation": "01 June 2015"
+    },
+    "CLT_CODE": {
+      "value": "1140",
+      "translate": false,
+      "translation": "1140"
+    },
+    "CLT_ADD": [
+      {
+        "value": "Mr. Ali Saeed Al Bwardy",
+        "translate": false,
+        "translation": "Mr. Ali Saeed Al Bwardy"
+      },
+      {
+        "value": " ",
+        "translate": false,
+        "translation": " "
+      },
+      {
+        "value": "88",
+        "translate": false,
+        "translation": "88"
+      },
+      {
+        "value": "DUBAI",
+        "translate": false,
+        "translation": "DUBAI"
+      },
+      {
+        "value": " ",
+        "translate": false,
+        "translation": " "
+      },
+      {
+        "value": " ",
+        "translate": false,
+        "translation": " "
+      }
+    ],
+    "REV_COMMENT": {
+      "value": " ",
+      "translate": false,
+      "translation": " "
+    },
+    "DETAIL_PNAM": [
+      {
+        "value": "PENDANT MAIN DE FATIMA WHITE GOLD",
+        "translate": false,
+        "translation": "PENDANT MAIN DE FATIMA WHITE GOLD"
+      },
+      {
+        "value": "BAIGNOIRE LM RH WGS GOLD BRAC MANUAL MVT",
+        "translate": false,
+        "translation": "BAIGNOIRE LM RH WGS GOLD BRAC MANUAL MVT"
+      },
+      {
+        "value": "BB CHRONO STL& LTHR BLCK DIAL(W6920079)",
+        "translate": false,
+        "translation": "BB CHRONO STL& LTHR BLCK DIAL(W6920079)"
+      }
+    ],
+    "DETAIL_PTYP": [
+      {
+        "value": "Jewellery",
+        "translate": true,
+        "translation": "-1171489292"
+      },
+      {
+        "value": "Jewellery",
+        "translate": true,
+        "translation": "-1171489292"
+      },
+      {
+        "value": "Jewellery",
+        "translate": true,
+        "translation": "-1171489292"
+      }
+    ],
+    "DETAIL_PCOD": [
+      {
+        "value": "Reference:B3037300/ Engraved Number:TEST123",
+        "translate": false,
+        "translation": "Reference:B3037300/ Engraved Number:TEST123"
+      },
+      {
+        "value": "Reference:WB520010/ Engraved Number:TEST456",
+        "translate": false,
+        "translation": "Reference:WB520010/ Engraved Number:TEST456"
+      },
+      {
+        "value": "Reference:W6920052",
+        "translate": false,
+        "translation": "Reference:W6920052"
+      }
+    ],
+    "DETAILQ": [
+      {
+        "value": "1",
+        "translate": true,
+        "translation": "-842352753"
+      },
+      {
+        "value": "1",
+        "translate": true,
+        "translation": "-842352753"
+      },
+      {
+        "value": "1",
+        "translate": true,
+        "translation": "-842352753"
+      }
+    ],
+    "DETAILV": [
+      {
+        "value": "3000.00",
+        "translate": true,
+        "translation": "-1534061611"
+      },
+      {
+        "value": "149000.00",
+        "translate": true,
+        "translation": "-1176743077"
+      },
+      {
+        "value": "12500.00",
+        "translate": true,
+        "translation": "-214624940"
+      }
+    ],
+    "REFTOTQTY": {
+      "value": "3",
+      "translate": true,
+      "translation": "-842352755"
+    },
+    "REFTOTVAL": {
+      "value": "164500.00",
+      "translate": true,
+      "translation": "1653372603"
+    },
+    "PAYMTHD": [
+      {
+        "value": "Cash AED",
+        "translate": true,
+        "translation": "944950629"
+      },
+      {
+        "value": "Amex",
+        "translate": true,
+        "translation": "-479346320"
+      },
+      {
+        "value": "Mastercard",
+        "translate": true,
+        "translation": "-1764008275"
+      },
+      {
+        "value": "Credit transfer",
+        "translate": true,
+        "translation": "1538196163"
+      }
+    ],
+    "PAYCODE": [
+      {
+        "value": " ",
+        "translate": false,
+        "translation": " "
+      },
+      {
+        "value": " ",
+        "translate": false,
+        "translation": " "
+      },
+      {
+        "value": " ",
+        "translate": false,
+        "translation": " "
+      },
+      {
+        "value": "6146023",
+        "translate": false,
+        "translation": "6146023"
+      }
+    ],
+    "PAYMENT": [
+      {
+        "value": "100000.00",
+        "translate": true,
+        "translation": "1682897832"
+      },
+      {
+        "value": "15000.00",
+        "translate": true,
+        "translation": "-964094931"
+      },
+      {
+        "value": "20000.00",
+        "translate": true,
+        "translation": "-949873716"
+      },
+      {
+        "value": "29500.00",
+        "translate": true,
+        "translation": "-198306573"
+      }
+    ],
+    "PAYTOT": {
+      "value": "164500.00",
+      "translate": true,
+      "translation": "1653372603"
+    }
+  }
+}
