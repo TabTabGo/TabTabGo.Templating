@@ -12,7 +12,6 @@
     <Nullable>enable</Nullable>
     <RootNamespace>TabTabGo.Templating.Liquid</RootNamespace>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <PackageVersion>6.0.0</PackageVersion>
     <PackageIcon>logo@32.png</PackageIcon>
   </PropertyGroup>
 

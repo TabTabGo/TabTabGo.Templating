@@ -9,7 +9,6 @@
     <LangVersion>default</LangVersion>
     <Nullable>enable</Nullable>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <PackageVersion>6.0.0</PackageVersion>
     <PackageIcon>logo@32.png</PackageIcon>
   </PropertyGroup>
 
