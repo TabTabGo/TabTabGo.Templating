@@ -1,9 +1,9 @@
 {
   "brand": {
-    "code": "CAR",
+    "code": "APPLE",
     "name": null
   },
-  "documentType": "NSI_INV",
+  "documentType": "NET_INV",
   "referenceId": "6149606",
   "data": {
     "PRT_NAME": {
@@ -50,9 +50,9 @@
     },
     "CLT_ADD": [
       {
-        "value": "Mr. Ali Saeed Al Bwardy",
+        "value": "Mr. Bob XYS",
         "translate": false,
-        "translation": "Mr. Ali Saeed Al Bwardy"
+        "translation": "Mr. Bob XYS"
       },
       {
         "value": " ",
@@ -87,34 +87,34 @@
     },
     "DETAIL_PNAM": [
       {
-        "value": "PENDANT MAIN DE FATIMA WHITE GOLD",
+        "value": "IPHONE 14 MAX 64GB SILVER",
         "translate": false,
-        "translation": "PENDANT MAIN DE FATIMA WHITE GOLD"
+        "translation": "IPHONE 14 MAX 64GB SILVER"
       },
       {
-        "value": "BAIGNOIRE LM RH WGS GOLD BRAC MANUAL MVT",
+        "value": "Cover for iPhone 14 Max",
         "translate": false,
-        "translation": "BAIGNOIRE LM RH WGS GOLD BRAC MANUAL MVT"
+        "translation": "Case for iPhone 14 Max"
       },
       {
-        "value": "BB CHRONO STL& LTHR BLCK DIAL(W6920079)",
+        "value": "Travel Adapter Fast Charge 37W",
         "translate": false,
-        "translation": "BB CHRONO STL& LTHR BLCK DIAL(W6920079)"
+        "translation": "Travel Adapter Fast Charge 37W"
       }
     ],
     "DETAIL_PTYP": [
       {
-        "value": "Jewellery",
+        "value": "Phone",
         "translate": true,
         "translation": "-1171489292"
       },
       {
-        "value": "Jewellery",
+        "value": "Accessories",
         "translate": true,
         "translation": "-1171489292"
       },
       {
-        "value": "Jewellery",
+        "value": "Accessories",
         "translate": true,
         "translation": "-1171489292"
       }

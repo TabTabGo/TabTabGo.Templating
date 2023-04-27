@@ -1,0 +1,37 @@
+name: Publish to NuGet
+on:
+  push:
+    tags:
+      - 'v*' # only publish on tag with semantic versioning
+
+jobs:
+  build-and-publish-TabTabGo-core:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Publish TabTabGo.Core to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.7
+        with:
+          project_path: 'src/TabTabGo.Templating/TabTabGo.Templating.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Templating'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+  
+      - name: Publish TabTabGo.Core.Services to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.7
+        with:
+          project_path: 'src/TabTabGo.Templating.Dotliquid/TabTabGo.Templating.Dotliquid.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Templating.Dotliquid'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+  
+      - name: Publish TabTabGo.Core.Infrastructure to NuGet
+        uses: tabtabgo/publish-to-nuget-action@v1.7
+        with:
+          project_path: 'src/TabTabGo.Templating.OpenXml/TabTabGo.Templating.OpenXml.csproj'
+          package_version: ${GITHUB_REF#refs/*/v}
+          package_name: 'TabTabGo.Templating.OpenXml'
+          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
+          
+  
