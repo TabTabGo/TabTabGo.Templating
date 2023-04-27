@@ -34,6 +34,11 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             //no parsing implemented 
         }
 
+        public override string RenderString(string templateString, object sourceData, string culture = "en-Us")
+        {
+            throw new NotSupportedException();
+        }
+
         public override void RegisterFilter(Type type)
         {
             //no filters implementation

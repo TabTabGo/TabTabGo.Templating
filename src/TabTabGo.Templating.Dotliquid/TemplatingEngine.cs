@@ -85,6 +85,17 @@ namespace TabTabGo.Templating.Liquid
             return result;
         }
 
+        public override string RenderString(string templateString, object sourceData, string culture ="en-Us")
+        {
+            var template = Template.Parse(templateString);
+            var hash = HashIt(sourceData);
+            var parameters = new RenderParameters(new CultureInfo(culture))
+            {
+                LocalVariables = Hash.FromDictionary(hash)
+            };
+            return template.Render(parameters);
+        }
+
         public override void RegisterFilter(Type type)
         {
             Template.RegisterFilter(type);

@@ -12,6 +12,7 @@ namespace TabTabGo.Templating
         public abstract bool IsCached(string templatePath);
         public abstract void ParseTemplate(string templatePath);
         public abstract object Render(string templatePath, object sourceData, string culture = "en-Us");
+        public abstract string RenderString(string templateString, object sourceData, string culture ="en-Us");
         public abstract void RegisterFilter(Type type);
     }
 
