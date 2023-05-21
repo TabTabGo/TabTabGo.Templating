@@ -268,7 +268,8 @@ namespace TabTabGo.Templating.Liquid
                 || type == typeof(DateTime)
                 || type == typeof(DateTimeOffset)
                 || type == typeof(JToken)
-                || type == typeof(JObject);
+                || type == typeof(JObject)
+                || type == typeof(Decimal);
 
         }
 
