@@ -5,7 +5,7 @@ on:
       - 'v*' # only publish on tag with semantic versioning
 
 jobs:
-  build-and-publish-TabTabGo-core:
+  build-and-publish-TabTabGo-Templating:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
