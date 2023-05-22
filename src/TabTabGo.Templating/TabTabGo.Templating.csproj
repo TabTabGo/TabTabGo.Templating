@@ -9,7 +9,6 @@
     <Copyright>Copyright 2022</Copyright>
     <LangVersion>default</LangVersion>
     <Nullable>enable</Nullable>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageIcon>logo@32.png</PackageIcon>
   </PropertyGroup>
 
