@@ -11,11 +11,13 @@
     <None Remove="json\match.json" />
     <None Remove="json\number.json" />
     <None Remove="json\numbers.json" />
+    <None Remove="json\numberToWords.json" />
     <None Remove="liquids\division.liquid" />
     <None Remove="liquids\match.liquid" />
     <None Remove="liquids\number-ae.liquid" />
     <None Remove="liquids\number.liquid" />
     <None Remove="liquids\numbers.liquid" />
+    <None Remove="liquids\numberToWords.liquid" />
     <None Remove="reconciliation\json\expected_atlantis_ni_01.json" />
     <None Remove="reconciliation\json\expected_ni_01.json" />
     <None Remove="reconciliation\liquid\report\_bootstrap.liquid" />
@@ -49,6 +51,9 @@
     <Content Include="json\division.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="json\numberToWords.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <Content Include="json\numbers.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -59,6 +64,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="liquids\division.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="liquids\numberToWords.liquid">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="liquids\numbers.liquid">

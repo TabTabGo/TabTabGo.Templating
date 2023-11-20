@@ -175,6 +175,18 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var expectedResult = "number1:123, number2:0.1, number3:-0.12, number4:11.11";
             Assert.Equal(expectedResult, renderedData);
         }
+        [Fact]
+        public void NumberToWords()
+        {
+            var dotLiquidEngine = new Liquid.TemplatingEngine();
+            var jsonStr = File.ReadAllText("./json/numberToWords.json");
+            var templatePath = "./liquids/numberToWords.liquid";
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+
+            var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
+            var expectedResult = "number:one hundred and twenty-three points forty-five";
+            Assert.Equal(expectedResult, renderedData);
+        }
 
         [Fact]
         public void DivideNumbers()

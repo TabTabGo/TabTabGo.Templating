@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using TabTabGo.Templating.Liquid.Extensions;
 
 namespace TabTabGo.Templating.Liquid.Filters
 {
@@ -88,6 +89,10 @@ namespace TabTabGo.Templating.Liquid.Filters
             }
 
             return output;
+        }
+        public static string ToWords(decimal input, string culture = "en")
+        {
+            return input.ToWords(culture: culture);
         }
     }
 }
