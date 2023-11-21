@@ -25,6 +25,9 @@
     <None Remove="reconciliation\liquid\report\_reportStyling.liquid" />
     <None Remove="reconciliation\liquid\report\_showchart.liquid" />
     <None Remove="reconciliation\liquid\report\_unmatchedTable.liquid" />
+    <None Update="json\numberToWords.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="liquids\biDi.liquid">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
@@ -32,6 +35,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="json\dates.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="liquids\numberToWords.liquid">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Update="liquids\offsetDate.liquid">
