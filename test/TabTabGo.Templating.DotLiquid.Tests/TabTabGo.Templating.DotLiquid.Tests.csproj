@@ -28,6 +28,12 @@
     <None Update="json\numberToWords.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="Layout\base\_layout.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Layout\child.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="liquids\biDi.liquid">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
