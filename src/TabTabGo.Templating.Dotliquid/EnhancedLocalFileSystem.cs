@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -39,7 +40,12 @@ namespace TabTabGo.Templating.Liquid
                 ? Path.Combine(Path.Combine(Root, Path.GetDirectoryName(templatePath)), string.Format("_{0}.liquid", Path.GetFileName(templatePath)))
                 : Path.Combine(Root, string.Format("_{0}.liquid", templatePath));
 
-            string escapedPath = Root.Replace(@"\", @"/").Replace("(", @"\(").Replace(")", @"\)");
+            string escapedPath = string.Empty;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                escapedPath = Root.Replace(@"\", @"\\").Replace("(", @"\(").Replace(")", @"\)");
+            else
+                escapedPath = Root.Replace(@"\", @"/").Replace("(", @"\(").Replace(")", @"\)");
+
             var escapedPathRegex = string.Format("^{0}", escapedPath);
             if (!Regex.IsMatch(fullPath, escapedPathRegex))
                 throw new FileSystemException("Illegal template path", Path.GetFullPath(fullPath));

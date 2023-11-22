@@ -73,12 +73,14 @@ namespace TabTabGo.Templating.Liquid
             ParseTemplate(templatePath);
 
             var hash = HashIt(sourceData);
+
             
             var parameters = new RenderParameters(new CultureInfo(culture))
             {
                 LocalVariables = Hash.FromDictionary(hash)
             };
 
+            Template.FileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
             var result = _templateCache[templatePath].Render(parameters);
 
             return result;
