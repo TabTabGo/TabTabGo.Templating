@@ -9,7 +9,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
     public class LayoutUnitTests
     {
         [Fact]
-        public void HashJson()
+        public void Layout_Use_Extends()
         {
             var dotLiquidEngine = new Liquid.TemplatingEngine();
            
@@ -17,8 +17,28 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             dynamic data = new { Child = "Test"};
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
+            var expectedResult = @"<!DOCTYPE html>
+<html>
+<head>
+    
+</head>
+<body>
+<table>
+    <tr><td><h1>Layout</h1></td></tr>
+    <tr>
+        <td colspan=""2"" style=""padding-bottom:10px;"">
+            
+   <p>Test</p>
+   <img src=""https://en.m.wikipedia.org/wiki/File:Flat_tick_icon.svg"" />
 
-           // Assert.Equal("hasString:a string,hasBool:true", renderedData);
+        </td>
+    </tr>
+  
+</table>
+</body>
+</html>
+";
+            Assert.Equal(expectedResult, renderedData);
         }
 
         
