@@ -12,9 +12,9 @@ namespace TabTabGo.Templating.DotLiquid.Tests
         public void Layout_Use_Extends()
         {
             var dotLiquidEngine = new Liquid.TemplatingEngine();
-           
+
             var templatePath = AppContext.BaseDirectory + "/../../../Layout/child.liquid";
-            dynamic data = new { Child = "Test"};
+            dynamic data = new { Child = "Test" };
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
             var expectedResult = @"<!DOCTYPE html>
@@ -41,6 +41,6 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             Assert.Equal(expectedResult, renderedData);
         }
 
-        
+
     }
 }
