@@ -34,6 +34,7 @@ namespace TabTabGo.Templating.Liquid
 
                     Template.RegisterFilter(typeof(CollectionFilters));
                     Template.RegisterFilter(typeof(ValueFilters));
+                    Template.RegisterFilter(typeof(CustomFilters));
                     Template.RegisterFilter(typeof(JObjectFilters));
                     Template.RegisterFilter(typeof(OpenXmlFilters));
                     Template.RegisterSafeType(typeof(JToken), new string[] { });

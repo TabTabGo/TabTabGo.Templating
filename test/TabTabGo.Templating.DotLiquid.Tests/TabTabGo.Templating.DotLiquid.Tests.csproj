@@ -43,6 +43,9 @@
     <None Update="json\dates.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="liquids\countryName.liquid">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="liquids\numberToWords.liquid">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
