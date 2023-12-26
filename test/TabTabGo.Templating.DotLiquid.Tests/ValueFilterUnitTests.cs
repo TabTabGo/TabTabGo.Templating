@@ -210,7 +210,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
-            var expectedResult = "number:one hundred and twenty-three points forty-five";
+            var expectedResult = "number:One Hundred and Twenty-Three points Forty-Five";
             Assert.Equal(expectedResult, renderedData);
         }
     }

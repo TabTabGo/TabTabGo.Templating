@@ -19,11 +19,56 @@ public static class HumanizerExtensions
     {
         var cultureInfo = CultureInfo.CreateSpecificCulture(culture);
         var integer = Math.Truncate(number).ToLong().ToWords(grammaticalGender, cultureInfo);
+        var shouldCapitalize = culture == "en";
         var fraction = number.GetFraction();
         if (fraction == 0)
-            return integer;
+            return (shouldCapitalize ? integer.Capitalize() : integer);
+
         var symbol = cultureInfo.GetSeparatorAsWords();
-        return $"{integer}{symbol}{fraction.ToWords(grammaticalGender, cultureInfo)}";
+        var fractionWords = fraction.ToWords(grammaticalGender, cultureInfo);
+        fractionWords = shouldCapitalize ? fractionWords.Capitalize() : fractionWords;
+
+        return $"{(shouldCapitalize ? integer.Capitalize() : integer)}{symbol}{fractionWords}";
+    }
+
+    private static string Capitalize(this string input)
+    {
+        var words = input.Split(' ');
+        var result = new StringBuilder();
+
+        foreach (var word in words)
+        {
+            bool isExcluded = word.Equals("and", StringComparison.OrdinalIgnoreCase);
+
+            if (isExcluded)
+            {
+                result.Append(word);
+            }
+            else if (word.Contains('-'))
+            {
+                var subWords = word.Split('-');
+                for (int i = 0; i < subWords.Length; i++)
+                {
+                    string subWord = subWords[i];
+                    string capitalizedSubWord = char.ToUpper(subWord[0]) + subWord.Substring(1).ToLower();
+                    result.Append(capitalizedSubWord);
+
+                    if (i < subWords.Length - 1)
+                    {
+                        result.Append('-');
+                    }
+                }
+            }
+            else
+            {
+                string capitalizedWord = char.ToUpper(word[0]) + word.Substring(1).ToLower();
+                result.Append(capitalizedWord);
+            }
+
+            result.Append(' ');
+        }
+
+        return result.ToString().TrimEnd();
     }
     public static string GetSeparatorAsWords(this CultureInfo cultureInfo)
     {
