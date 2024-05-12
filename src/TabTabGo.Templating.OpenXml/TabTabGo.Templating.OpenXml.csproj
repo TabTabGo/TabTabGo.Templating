@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
-    <Version>$(VersionSuffix)</Version>
+    <TargetFramework>net8.0</TargetFramework>
+    <Version>8.0.0</Version>
     <Authors>TabTabGo</Authors>
     <Description>OpenXML's implementation of TabTabGo's Templeting engine</Description>
     <Copyright>TabTabGo 2022</Copyright>
@@ -12,10 +12,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="DocumentFormat.OpenXml" Version="2.18.0" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.0.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Xml.XDocument" Version="4.3.0" />
-    <PackageReference Include="TabTabGo.Core" Version="6.0.8.3" />
     <PackageReference Include="TabTabGo.IO.Utilities" Version="6.0.6.3" />
     <ProjectReference Include="..\TabTabGo.Templating\TabTabGo.Templating.csproj" />
   </ItemGroup>

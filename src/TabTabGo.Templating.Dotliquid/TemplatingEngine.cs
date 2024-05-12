@@ -7,12 +7,10 @@ using System.Threading;
 using DotLiquid;
 using System;
 using System.Globalization;
-using DotLiquid.FileSystems;
 using Newtonsoft.Json.Linq;
 using TabTabGo.Templating.Liquid.Filters;
 using TabTabGo.Templating.Liquid.Tags;
 using System.Runtime.CompilerServices;
-using TabTabGo.Core;
 
 namespace TabTabGo.Templating.Liquid
 {
