@@ -22,6 +22,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         private WorkbookPart CurrentWorkbookPart { get; set; }
         public override string EngineName => "OpenXml";
+
         //ToDo: add implementation with cache capabilities
         public override bool IsCached(string templatePath)
         {
@@ -31,10 +32,14 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         public override void ParseTemplate(string templatePath)
         {
-            //no parsing implemented 
+            //no parsing implemented
         }
 
-        public override string RenderString(string templateString, object sourceData, string culture = "en-Us")
+        public override string RenderString(
+            string templateString,
+            object sourceData,
+            string culture = "en-Us"
+        )
         {
             throw new NotSupportedException();
         }
@@ -56,12 +61,18 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// Generate SpreadSheet can't be renderd.
         /// </exception>
         /// <exception cref="NotImplementedException"></exception>
-        public override object Render(string templatePath, object sourceData, string culture = "en-Us")
+        public override object Render(
+            string templatePath,
+            object sourceData,
+            string culture = "en-Us"
+        )
         {
             var jObject = (sourceData as JObject) ?? JObject.FromObject(sourceData);
             if (jObject == null)
             {
-                throw new NotSupportedException("Data source can't be serialized to Json. Please make sure object is serilazable to json.");
+                throw new NotSupportedException(
+                    "Data source can't be serialized to Json. Please make sure object is serilazable to json."
+                );
             }
 
             string outputFilePath = Path.GetTempFileName() + Path.GetExtension(templatePath);
@@ -73,7 +84,6 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
             else if (!string.IsNullOrEmpty(templatePath))
             {
-
                 Dictionary<int, string> macroList = null;
                 //prepare excel file
                 string sourceFilePath = templatePath;
@@ -102,18 +112,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             {
                 // ignored
             }
-            catch (NotSupportedException nexException)
-            {
-
-            }
-            catch (Exception exception)
-            {
-
-            }
+            catch (NotSupportedException nexException) { }
+            catch (Exception exception) { }
 
             return mStream;
-
-
         }
 
         #region Helper function
@@ -126,7 +128,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <returns></returns>
         private string GetJsonPath(string macro)
         {
-            return !string.IsNullOrEmpty(macro) ? macro.Replace(START_EXPR, String.Empty).Replace(END_EXPR, string.Empty) : string.Empty;
+            return !string.IsNullOrEmpty(macro)
+                ? macro.Replace(START_EXPR, String.Empty).Replace(END_EXPR, string.Empty)
+                : string.Empty;
         }
 
         /// <summary>
@@ -135,22 +139,37 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="workBookPart">The work book part.</param>
         /// <param name="data">The data.</param>
         /// <param name="macroList">The macro list.</param>
-        private void ParseMacroCells(WorkbookPart workBookPart, JObject data, Dictionary<int, string> macroList)
+        private void ParseMacroCells(
+            WorkbookPart workBookPart,
+            JObject data,
+            Dictionary<int, string> macroList
+        )
         {
             var currWorkBookPart = workBookPart;
             var sheets = currWorkBookPart.Workbook.GetFirstChild<Sheets>().Elements<Sheet>();
 
             foreach (var currSheet in sheets)
             {
-                var currWorksheetPart = (WorksheetPart)currWorkBookPart.GetPartById(currSheet.Id);
+                if (
+                    currSheet.Id?.Value is not string relationshipId
+                    || currWorkBookPart.GetPartById(relationshipId)
+                        is not WorksheetPart currWorksheetPart
+                )
+                {
+                    continue;
+                }
                 var currSheetData = currWorksheetPart.Worksheet.GetFirstChild<SheetData>();
                 var sharedStringTable = currWorkBookPart.SharedStringTablePart.SharedStringTable;
 
                 //write data to Fix cell Not Table
-                var currCells = currSheetData.Descendants<Cell>().Where(c => c.DataType != null
-                                                                             && c.DataType.HasValue
-                                                                             && c.DataType.Value == CellValues.SharedString
-                                                                             && macroList.ContainsKey(Convert.ToInt32(c.CellValue.InnerText)));
+                var currCells = currSheetData
+                    .Descendants<Cell>()
+                    .Where(c =>
+                        c.DataType != null
+                        && c.DataType.HasValue
+                        && c.DataType.Value == CellValues.SharedString
+                        && macroList.ContainsKey(Convert.ToInt32(c.CellValue.InnerText))
+                    );
 
                 foreach (var cell in currCells)
                 {
@@ -165,7 +184,6 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 //write data to templated cells for vendor details
                 foreach (var part in currWorksheetPart.TableDefinitionParts)
                 {
-
                     var table = part.Table;
                     var newTablePartId = currWorksheetPart.GetIdOfPart(part);
                     var range = table.Reference.Value.Split(':');
@@ -182,31 +200,44 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                         templateRowRange = startRowTableRange + 1;
                         for (int i = startRowTableRange + 2; i <= endRowTableRange; i++)
                         {
-                            rowsToAdd.Add(currSheetData.Elements<Row>().First(row => row.RowIndex == i));
+                            rowsToAdd.Add(
+                                currSheetData.Elements<Row>().First(row => row.RowIndex == i)
+                            );
                         }
                     }
                     //Add all rows after table to update the index
-                    var rowsAfterTable = currSheetData.Elements<Row>().Where(row => row.RowIndex > endRowTableRange).ToList();
+                    var rowsAfterTable = currSheetData
+                        .Elements<Row>()
+                        .Where(row => row.RowIndex > endRowTableRange)
+                        .ToList();
 
-                    var anchorRow = currSheetData.Elements<Row>().First(row => row.RowIndex == templateRowRange);
+                    var anchorRow = currSheetData
+                        .Elements<Row>()
+                        .First(row => row.RowIndex == templateRowRange);
                     var templateCells = anchorRow.Elements<Cell>().ToList();
 
                     var rowIndex = templateRowRange;
 
-                    var jsonPath =
-                        templateCells.Where(templateCell => templateCell.DataType != null
-                                                            && templateCell.DataType.HasValue
-                                                            && templateCell.DataType.Value == CellValues.SharedString
-                                                            &&
-                                                            macroList.ContainsKey(
-                                                                Convert.ToInt32(templateCell.CellValue.InnerText)))
-                            .Select(templateCell => macroList[Convert.ToInt32(templateCell.CellValue.InnerText)])
-                            .FirstOrDefault(jPath => jPath.Contains(ARRAY_PATH));
+                    var jsonPath = templateCells
+                        .Where(templateCell =>
+                            templateCell.DataType != null
+                            && templateCell.DataType.HasValue
+                            && templateCell.DataType.Value == CellValues.SharedString
+                            && macroList.ContainsKey(
+                                Convert.ToInt32(templateCell.CellValue.InnerText)
+                            )
+                        )
+                        .Select(templateCell =>
+                            macroList[Convert.ToInt32(templateCell.CellValue.InnerText)]
+                        )
+                        .FirstOrDefault(jPath => jPath.Contains(ARRAY_PATH));
 
                     if (!string.IsNullOrEmpty(jsonPath))
                     {
-                        var jsonArrayPath = jsonPath.Substring(0,
-                            jsonPath.IndexOf(ARRAY_PATH, StringComparison.CurrentCultureIgnoreCase));
+                        var jsonArrayPath = jsonPath.Substring(
+                            0,
+                            jsonPath.IndexOf(ARRAY_PATH, StringComparison.CurrentCultureIgnoreCase)
+                        );
 
                         var jArray = data.SelectTokens(jsonArrayPath).Children();
                         var aIndex = 0;
@@ -218,48 +249,69 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                             {
                                 var columnjPath = string.Empty;
 
-                                if (oCell.DataType != null && oCell.DataType.HasValue &&
-                                    oCell.DataType.Value == CellValues.SharedString &&
-                                    macroList.ContainsKey(Convert.ToInt32(oCell.CellValue.InnerText)))
+                                if (
+                                    oCell.DataType != null
+                                    && oCell.DataType.HasValue
+                                    && oCell.DataType.Value == CellValues.SharedString
+                                    && macroList.ContainsKey(
+                                        Convert.ToInt32(oCell.CellValue.InnerText)
+                                    )
+                                )
                                 {
-                                    var jPath = macroList[Convert.ToInt32(oCell.CellValue.InnerText)];
+                                    var jPath = macroList[
+                                        Convert.ToInt32(oCell.CellValue.InnerText)
+                                    ];
                                     if (jPath.Contains(ARRAY_PATH))
                                     {
-                                        columnjPath = jPath.Substring(jPath.IndexOf(ARRAY_PATH, StringComparison.CurrentCultureIgnoreCase) + ARRAY_PATH.Length);
+                                        columnjPath = jPath.Substring(
+                                            jPath.IndexOf(
+                                                ARRAY_PATH,
+                                                StringComparison.CurrentCultureIgnoreCase
+                                            ) + ARRAY_PATH.Length
+                                        );
                                     }
                                 }
 
                                 var nCell = new Cell()
                                 {
                                     StyleIndex = oCell.StyleIndex,
-                                    CellReference = Utility.GetColumnName(oCell.CellReference) + rowIndex
+                                    CellReference =
+                                        Utility.GetColumnName(oCell.CellReference) + rowIndex,
                                 };
 
                                 if (aIndex == 0 && oCell.CellFormula != null)
                                 {
                                     nCell.CellFormula = new CellFormula()
                                     {
-                                        FormulaType = new EnumValue<CellFormulaValues>(CellFormulaValues.Shared),
+                                        FormulaType = new EnumValue<CellFormulaValues>(
+                                            CellFormulaValues.Shared
+                                        ),
                                         SharedIndex = (uint)sharedFormulaCells.Count,
-                                        Text = oCell.CellFormula.Text
-
+                                        Text = oCell.CellFormula.Text,
                                     };
-                                    sharedFormulaCells.Add(colIndex,
-                                        new Tuple<int, Cell>(sharedFormulaCells.Count, nCell));
+                                    sharedFormulaCells.Add(
+                                        colIndex,
+                                        new Tuple<int, Cell>(sharedFormulaCells.Count, nCell)
+                                    );
                                 }
                                 else if (oCell.CellFormula != null)
                                 {
                                     nCell.CellFormula = new CellFormula()
                                     {
-                                        SharedIndex = (uint)(sharedFormulaCells.ContainsKey(colIndex) ? sharedFormulaCells[colIndex].Item1 : 0),
-                                        FormulaType = new EnumValue<CellFormulaValues>(CellFormulaValues.Shared)
+                                        SharedIndex = (uint)(
+                                            sharedFormulaCells.ContainsKey(colIndex)
+                                                ? sharedFormulaCells[colIndex].Item1
+                                                : 0
+                                        ),
+                                        FormulaType = new EnumValue<CellFormulaValues>(
+                                            CellFormulaValues.Shared
+                                        ),
                                     };
                                 }
                                 else
                                 {
                                     UpdateCellValue(nCell, oCell, jToken, columnjPath, rowIndex);
                                 }
-
 
                                 nRow.Append(nCell);
                                 colIndex++;
@@ -274,24 +326,25 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     //Modify the shared cell formula
                     foreach (var formulaCell in sharedFormulaCells)
                     {
-                        formulaCell.Value.Item2.CellFormula.Reference = $"{formulaCell.Value.Item2.CellReference}:{Utility.GetColumnName(formulaCell.Value.Item2.CellReference)}{rowIndex}";
+                        formulaCell.Value.Item2.CellFormula.Reference =
+                            $"{formulaCell.Value.Item2.CellReference}:{Utility.GetColumnName(formulaCell.Value.Item2.CellReference)}{rowIndex}";
                     }
 
                     rowIndex = UpdateRowsIndex(rowsToAdd, rowIndex);
                     //remove anchor row
                     currSheetData.RemoveChild(anchorRow);
-                    table.Reference.Value = $"{startColumn}{startRowTableRange}:{endColumn}{rowIndex - 1}";
+                    table.Reference.Value =
+                        $"{startColumn}{startRowTableRange}:{endColumn}{rowIndex - 1}";
                     rowIndex = UpdateRowsIndex(rowsAfterTable, rowIndex);
-                    currWorksheetPart.Worksheet.SheetDimension.Reference = $"A1:{endColumn}{rowIndex - 1}";
+                    currWorksheetPart.Worksheet.SheetDimension.Reference =
+                        $"A1:{endColumn}{rowIndex - 1}";
                     tableIndex++;
                 }
 
                 currWorkBookPart.Workbook.CalculationProperties.ForceFullCalculation = true;
                 currWorkBookPart.Workbook.CalculationProperties.FullCalculationOnLoad = true;
                 currWorksheetPart.Worksheet.Save();
-
             }
-
         }
 
         /// <summary>
@@ -307,12 +360,12 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 cloneRow.RowIndex.Value = (uint)rowIndex;
                 foreach (var cloneCell in cloneRow.Elements<Cell>())
                 {
-                    cloneCell.CellReference = Utility.GetColumnName(cloneCell.CellReference) + rowIndex;
+                    cloneCell.CellReference =
+                        Utility.GetColumnName(cloneCell.CellReference) + rowIndex;
                 }
                 //currSheetData.InsertBefore(cloneRow, anchorRow);
                 rowIndex++;
             }
-
 
             return rowIndex;
         }
@@ -326,12 +379,13 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         {
             var sst = workbookPart.SharedStringTablePart.SharedStringTable;
             var index = 0;
-            var ssDictionary = sst.Elements<SharedStringItem>().ToDictionary(ssValue => index++, ssValue => ssValue.InnerText);
-            return
-                ssDictionary.Where(ss => ss.Value.StartsWith(START_EXPR) && ss.Value.EndsWith(END_EXPR))
-                    .ToDictionary(ss => ss.Key, ss => GetJsonPath(ss.Value));
-
+            var ssDictionary = sst.Elements<SharedStringItem>()
+                .ToDictionary(ssValue => index++, ssValue => ssValue.InnerText);
+            return ssDictionary
+                .Where(ss => ss.Value.StartsWith(START_EXPR) && ss.Value.EndsWith(END_EXPR))
+                .ToDictionary(ss => ss.Key, ss => GetJsonPath(ss.Value));
         }
+
         /// <summary>
         /// Create new columns and add it to the column collection
         /// </summary>
@@ -348,7 +402,20 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="newColumnList"></param>
         /// <param name="i"></param>
         /// <returns>string</returns>
-        private string AddNewCol(string endColumn, int startRowTableRange, int endRowTableRange, WorkbookPart workbookPart, Row anchorRow, Cell anchorCell, Row blankanchorRow, Cell blankanchorCell, UInt32Value totalColumns, TableColumn lastcolumn, List<TableColumn> newColumnList, int i)
+        private string AddNewCol(
+            string endColumn,
+            int startRowTableRange,
+            int endRowTableRange,
+            WorkbookPart workbookPart,
+            Row anchorRow,
+            Cell anchorCell,
+            Row blankanchorRow,
+            Cell blankanchorCell,
+            UInt32Value totalColumns,
+            TableColumn lastcolumn,
+            List<TableColumn> newColumnList,
+            int i
+        )
         {
             var colName = string.Empty;
             var newColumn = new TableColumn();
@@ -377,7 +444,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
             endColumn = Utility.GetNextColumnName(endColumn); //Get the next column
 
-            var index = InsertSharedStringItem(workbookPart, colName);//insert shared string item
+            var index = InsertSharedStringItem(workbookPart, colName); //insert shared string item
 
             var newCell = new Cell();
             newCell.CellReference = string.Format("{0}{1}", endColumn, startRowTableRange);
@@ -387,17 +454,17 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
             anchorRow.Append(newCell);
 
-            //add blank row           
+            //add blank row
             index = InsertSharedStringItem(workbookPart, colName.Replace(" ", ""));
             newCell = new Cell();
-            newCell.CellReference = string.Format("{0}{1}", endColumn, endRowTableRange); ;
+            newCell.CellReference = string.Format("{0}{1}", endColumn, endRowTableRange);
+            ;
             newCell.StyleIndex = blankanchorCell.StyleIndex;
             newCell.CellValue = new CellValue(index.ToString());
             newCell.DataType = new EnumValue<CellValues>(CellValues.SharedString);
 
             blankanchorRow.Append(newCell);
             return endColumn;
-
         }
 
         /// <summary>
@@ -408,7 +475,13 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="data">The data.</param>
         /// <param name="jsonValuePath">The json value path.</param>
         /// <param name="rowIndex">Index of the row.</param>
-        private void UpdateCellValue(Cell nCell, Cell templateCell, JToken data, string jsonValuePath, int rowIndex)
+        private void UpdateCellValue(
+            Cell nCell,
+            Cell templateCell,
+            JToken data,
+            string jsonValuePath,
+            int rowIndex
+        )
         {
             if (string.IsNullOrEmpty(jsonValuePath))
             {
@@ -418,7 +491,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             {
                 var jsonValueWithoutFormat = jsonValuePath;
                 var valueFormat = string.Empty;
-                var iFormatKey = jsonValuePath.IndexOf(VALUE_FORMAT, StringComparison.CurrentCultureIgnoreCase);
+                var iFormatKey = jsonValuePath.IndexOf(
+                    VALUE_FORMAT,
+                    StringComparison.CurrentCultureIgnoreCase
+                );
                 if (iFormatKey > 1)
                 {
                     jsonValueWithoutFormat = jsonValuePath.Substring(0, iFormatKey);
@@ -432,14 +508,19 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     bool blValue = false;
                     DateTime dtValue = DateTime.UtcNow;
 
-
-                    if (!string.IsNullOrEmpty(valueFormat) && valueFormat.Equals("IS", StringComparison.CurrentCulture))
+                    if (
+                        !string.IsNullOrEmpty(valueFormat)
+                        && valueFormat.Equals("IS", StringComparison.CurrentCulture)
+                    )
                     {
                         valueString = ToValidXmlCharactersString(valueString);
                         //valueString = ReplaceHexadecimalSymbols(valueString);
                         UpdateInlineCellValue(nCell, valueString);
                     }
-                    else if (!string.IsNullOrEmpty(valueFormat) && valueFormat.Equals("SS", StringComparison.CurrentCulture))
+                    else if (
+                        !string.IsNullOrEmpty(valueFormat)
+                        && valueFormat.Equals("SS", StringComparison.CurrentCulture)
+                    )
                     {
                         valueString = ToValidXmlCharactersString(valueString);
                         //valueString = ReplaceHexadecimalSymbols(valueString);
@@ -453,12 +534,18 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     else if (bool.TryParse(valueString, out blValue))
                     {
                         nCell.DataType = new EnumValue<CellValues>(CellValues.Boolean);
-                        nCell.CellValue = new CellValue(dblValue.ToString(CultureInfo.InvariantCulture));
+                        nCell.CellValue = new CellValue(
+                            dblValue.ToString(CultureInfo.InvariantCulture)
+                        );
                     }
                     else if (DateTime.TryParse(valueString, out dtValue))
                     {
-                        UpdateInlineCellValue(nCell,
-                            string.IsNullOrEmpty(valueFormat) ? dtValue.ToString("G") : dtValue.ToString(valueFormat));
+                        UpdateInlineCellValue(
+                            nCell,
+                            string.IsNullOrEmpty(valueFormat)
+                                ? dtValue.ToString("G")
+                                : dtValue.ToString(valueFormat)
+                        );
                     }
                     else
                     {
@@ -472,8 +559,6 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     UpdateInlineCellValue(nCell, string.Empty);
                 }
             }
-
-
         }
 
         /// <summary>
@@ -527,7 +612,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var index = 0;
             var found = false;
             var stringTablePart = workbookPart
-                .GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
+                .GetPartsOfType<SharedStringTablePart>()
+                .FirstOrDefault();
 
             // If the shared string table is missing, something's wrong.
             // Just return the index that you found in the cell.
@@ -544,7 +630,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 stringTable = new SharedStringTable();
             }
 
-            // Iterate through all the items in the SharedStringTable. 
+            // Iterate through all the items in the SharedStringTable.
             // If the text already exists, return its index.
             foreach (SharedStringItem item in stringTable.Elements<SharedStringItem>())
             {
@@ -569,7 +655,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         /// <summary>
         /// Determines if any invalid XML 1.0 characters exist within the string,
-        /// and if so it returns a new string with the invalid chars removed, else 
+        /// and if so it returns a new string with the invalid chars removed, else
         /// the same string is returned (with no wasted StringBuilder allocated, etc).
         /// </summary>
         /// <param name="s">Xml string.</param>
@@ -604,8 +690,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         {
             if (s != null && s.Length > 0 && startIndex < s.Length)
             {
-
-                if (startIndex < 0) startIndex = 0;
+                if (startIndex < 0)
+                    startIndex = 0;
                 int len = s.Length;
 
                 for (int i = startIndex; i < len; i++)
@@ -617,7 +703,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         /// <summary>
         /// Indicates whether a given character is valid according to the XML 1.0 spec.
-        /// This code represents an optimized version of Tom Bogle's on SO: 
+        /// This code represents an optimized version of Tom Bogle's on SO:
         /// https://stackoverflow.com/a/13039301/264031.
         /// </summary>
         public static bool IsLegalXmlChar(char c)
@@ -631,7 +717,11 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             //c <= 1114111 */ // impossible to get a code point bigger than 1114111 because Char.ConvertToUtf32 would have thrown an exception
         }
 
-        static Regex regexReplaceHex = new Regex("[\x00-\x08\x0B\x0C\x0E-\x1F\x26]", RegexOptions.Compiled);
+        static Regex regexReplaceHex = new Regex(
+            "[\x00-\x08\x0B\x0C\x0E-\x1F\x26]",
+            RegexOptions.Compiled
+        );
+
         static string ReplaceHexadecimalSymbols(string txt)
         {
             //string r = "[\x00-\x08\x0B\x0C\x0E-\x1F\x26]";
@@ -641,7 +731,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             {
                 return txt;
             }
-                
+
             return regexReplaceHex.Replace(txt, string.Empty);
         }
 
