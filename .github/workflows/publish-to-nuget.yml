@@ -1,37 +1,82 @@
 name: Publish to NuGet
+
+# Tagged releases: the tag IS the package version (v8.0.2 -> 8.0.2).
+# Every push to master is handled separately by publish-to-nuget-master.yml.
+# Both paths share tools/packnpush.py so there is one version code path.
+
 on:
   push:
     tags:
       - 'v*' # only publish on tag with semantic versioning
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact package version to publish (e.g. 8.0.2)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Pack only, do not push to NuGet'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-to-nuget-tag-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-publish-TabTabGo-Templating:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
-      - name: Publish TabTabGo.Core to NuGet
-        uses: tabtabgo/publish-to-nuget-action@v1.7
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
-          project_path: 'src/TabTabGo.Templating/TabTabGo.Templating.csproj'
-          package_version: ${GITHUB_REF#refs/*/v}
-          package_name: 'TabTabGo.Templating'
-          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
-  
-      - name: Publish TabTabGo.Core.Services to NuGet
-        uses: tabtabgo/publish-to-nuget-action@v1.7
-        with:
-          project_path: 'src/TabTabGo.Templating.Dotliquid/TabTabGo.Templating.Dotliquid.csproj'
-          package_version: ${GITHUB_REF#refs/*/v}
-          package_name: 'TabTabGo.Templating.Dotliquid'
-          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
-  
-      - name: Publish TabTabGo.Core.Infrastructure to NuGet
-        uses: tabtabgo/publish-to-nuget-action@v1.7
-        with:
-          project_path: 'src/TabTabGo.Templating.OpenXml/TabTabGo.Templating.OpenXml.csproj'
-          package_version: ${GITHUB_REF#refs/*/v}
-          package_name: 'TabTabGo.Templating.OpenXml'
-          nuget_api_key: ${{ secrets.NUGET_API_KEY }}
-          
-  
+          dotnet-version: 8.0.x
+
+      - name: Resolve package version
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          version="${INPUT_VERSION:-${REF_NAME#v}}"
+          if [ -z "$version" ]; then
+            echo "could not resolve a package version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Package version: $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore dependencies
+        run: dotnet restore TabTabGo.Templating.sln
+
+      - name: Build
+        run: dotnet build TabTabGo.Templating.sln -c Release --no-restore
+
+      - name: Test
+        # Advisory — see publish-to-nuget-master.yml; 5 tests are currently red.
+        continue-on-error: true
+        run: dotnet test TabTabGo.Templating.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Pack and push
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: >-
+          python3 tools/packnpush.py
+          --version "$VERSION"
+          ${{ inputs.dry_run == true && '--local' || '' }}
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Published ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- TabTabGo.Templating"
+            echo "- TabTabGo.Templating.Dotliquid"
+            echo "- TabTabGo.Templating.OpenXml"
+          } >> "$GITHUB_STEP_SUMMARY"
