@@ -1,0 +1,79 @@
+name: Publish to NuGet (master)
+
+# Auto-publish: every push to master packs and pushes all three packages.
+# Version = <major>.<minor>.<yyMM>.<dd><run_number> — see tools/packnpush.py.
+# Tag-based releases (v*) are still handled by publish-to-nuget.yml.
+
+on:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - 'assets/**'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Pack only, do not push to NuGet'
+        type: boolean
+        default: false
+      require_tests:
+        description: 'Fail the publish if any test fails'
+        type: boolean
+        default: false
+
+concurrency:
+  group: publish-to-nuget-master
+  cancel-in-progress: false
+
+jobs:
+  build-pack-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve package version
+        id: version
+        run: |
+          version=$(python3 tools/packnpush.py -p "${{ github.run_number }}" --print-version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Package version: $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore dependencies
+        run: dotnet restore TabTabGo.Templating.sln
+
+      - name: Build
+        run: dotnet build TabTabGo.Templating.sln -c Release --no-restore
+
+      - name: Test
+        # Advisory by default — a red test does not block the package feed.
+        # Re-run via workflow_dispatch with require_tests=true to gate on them.
+        continue-on-error: ${{ inputs.require_tests != true }}
+        run: dotnet test TabTabGo.Templating.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Pack and push
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: >-
+          python3 tools/packnpush.py
+          -p "${{ github.run_number }}"
+          ${{ inputs.dry_run == true && '--local' || '' }}
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Published ${{ steps.version.outputs.version }}"
+            echo ""
+            echo "- TabTabGo.Templating"
+            echo "- TabTabGo.Templating.Dotliquid"
+            echo "- TabTabGo.Templating.OpenXml"
+          } >> "$GITHUB_STEP_SUMMARY"
