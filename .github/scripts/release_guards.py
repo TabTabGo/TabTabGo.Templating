@@ -73,6 +73,19 @@ def check_tfm_major(root: Path, tag_major: str) -> None:
             raise GuardError(f"tag major {tag_major} does not match target framework {framework} of this commit")
 
 
+def check_tag_points_at_sha(tag: str, sha: str) -> None:
+    """The tag ref (not a branch of the same name) must resolve to the commit the run was triggered for."""
+    result = subprocess.run(
+        ["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"], capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        raise GuardError(f"tag refs/tags/{tag} does not exist in this checkout")
+    resolved = result.stdout.strip()
+    expected = subprocess.run(["git", "rev-parse", f"{sha}^{{commit}}"], capture_output=True, text=True).stdout.strip()
+    if resolved != expected:
+        raise GuardError(f"refs/tags/{tag} resolves to {resolved}, not the triggering commit {expected}")
+
+
 def check_release_branch(sha: str, core: dict[str, str | bool]) -> None:
     """Step 4: the tagged commit is on origin/releases/vM.m.x/vM.m.p."""
     branch = f"origin/releases/v{core['major']}.{core['minor']}.x/v{core['core']}"
@@ -130,6 +143,8 @@ def main(argv: list[str]) -> int:
     try:
         info = parse_tag(args.tag)
         check_tfm_major(root, str(info["major"]))
+        if not args.offline:
+            check_tag_points_at_sha(args.tag, args.sha)
         check_release_branch(args.sha, info)
         check_declared_version(root, str(info["core"]))
         if not args.offline:
