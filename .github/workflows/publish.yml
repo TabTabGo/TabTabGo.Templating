@@ -25,9 +25,19 @@ jobs:
       version: ${{ steps.guards.outputs.version }}
       prerelease: ${{ steps.guards.outputs.prerelease }}
     steps:
-      - name: Checkout (full history so release branches and tags are available)
+      - name: Refuse re-runs and actor mismatches (a re-run keeps the original actor; tag again instead)
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs of a publish run are not allowed; push a new tag"; exit 1; fi
+          if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor"; exit 1; fi
+
+      - name: Checkout the tag explicitly (full history so release branches and tags are available)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0
 
       - name: Release guards (tag format, tag major == TFM major, tag on its release branch, version == tag, not published)
@@ -92,6 +102,15 @@ jobs:
       id-token: write # the only job allowed to request an OIDC token
       contents: read
     steps:
+      - name: Refuse re-runs and actor mismatches
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs of a publish run are not allowed; push a new tag"; exit 1; fi
+          if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor"; exit 1; fi
+
       - name: Download packages
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
