@@ -37,8 +37,9 @@ the **thread** unless the template passes a culture argument (bug B-6, fixed on 
 ## Includes and layouts
 
 `{% include 'name' %}` and `{% extends 'layout' %}` read `_name.liquid` from the directory of the template that is being
-rendered. The partial must stay under that directory (name pattern `^[.\/]*[a-zA-Z0-9_\/]+$`). Section 8.0.4 hardens this
-confinement.
+rendered. The partial must stay under that directory: names that are rooted, that climb out of it with `..`, or that come
+from a non-string variable fail with `FileSystemException`. The file system belongs to the render (not to a process-wide
+static), so templates in different folders can render in parallel.
 
 ## Filters
 
@@ -46,7 +47,7 @@ Filters are called with the C# member name: `{{ value | FormatNumber: 'C' }}`.
 
 | Group | Filters |
 |---|---|
-| Collections | `SelectMany`, `XPathSelectMany`, `RemoveEmpty`, `Union`, `Filter`, `Flatten`, `Distinct`, `OrderBy`, `GroupBy` |
+| Collections | `SelectMany`, `XPathSelectMany`, `RemoveEmpty`, `Union`, `Filter`, `FilterBy`, `FilterByPrefix`, `Flatten`, `Distinct`, `OrderBy`, `GroupBy` |
 | Values and strings | `Contains`, `ToString`, `Select`, `XPathSelect`, `SliceEnd`, `ReverseSlice`, `Strip`, `Lstrip`, `Rstrip`, `GetMatch`, `FullPath`, `AppSetting` |
 | Numbers | `DivideBy`, `Number`, `FormatNumber`, `FormatCurrency`, `FormatCurrencyWithCode`, `MarkNumbers`, `ToWords` |
 | Dates | `ToTimeZone`, `OffsetDate`, `FormatDate`, `ParseDate` |
@@ -69,6 +70,19 @@ Examples (each one is covered by a test in `test/TabTabGo.Templating.DotLiquid.T
 (`it["k"].ToString() = "v"`, `.StartsWith("v")`, `== null`, `!= null`, `.Contains(...) and ...`). Reflection over
 types outside the predefined set is blocked by the library. Do not build expressions from untrusted data.
 
+### `FilterBy` and `FilterByPrefix`
+
+Prefer these to `Filter` when the value comes from data: `{{ items | FilterBy: 'status', 'active' }}` keeps the items whose
+`status` equals `active` (compared as text), `{{ items | FilterByPrefix: 'name', 'Al' }}` keeps those starting with `Al`
+(ordinal). No expression is parsed.
+
+### `AppSetting`, `GetMatch`, `XPathSelect`
+
+* `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is an empty string.
+  Host configuration files are never read.
+* `GetMatch` stops after `TemplatingOptions.RegexTimeout` and returns an empty string.
+* `XPathSelect`/`XPathSelectMany` reject XML with a DTD and documents larger than `MaxXmlCharacters`.
+
 ### Custom filters
 
 `engine.RegisterFilter(typeof(MyFilters))` registers a static class of filters. Registration is process-wide: do it
@@ -79,7 +93,8 @@ once at start-up.
 `{% increment name %}` adds 1 to the integer variable `name` in the outermost scope. The variable must already exist
 (a missing variable fails on the v8 line, bug F-12).
 
-## Limits and known issues on the v8 line
+## Known issues on the v8 line
 
-The 8.0.4 release addresses the security rows (S-1..S-5, B-1, B-2). The remaining filter and culture fixes ship on v10.
-See the specification in `tabtabgo/docs/templating-modernization/spec.md` section 6.
+Fixed on v10, not on v8: filter, culture and typing bugs F-1..F-17, the per-instance hash cache (B-3: do not share one
+engine instance across threads on v8; create one per render or serialise), and `RenderString` not initialising the engine
+(B-4). The 8.0.4 release closes S-1..S-5, B-1 and B-2. See `tabtabgo/docs/templating-modernization/spec.md` section 6.

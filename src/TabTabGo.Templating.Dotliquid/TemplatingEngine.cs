@@ -1,4 +1,5 @@
-﻿using System.Collections;
+using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -19,8 +20,31 @@ namespace TabTabGo.Templating.Liquid
         private static object _lock = new object();
         private static bool _isIinitialized = false;
         private readonly Dictionary<int, Dictionary<object, object>> _hashCache = new Dictionary<int, Dictionary<object, object>>();
-        private static readonly Dictionary<string, Template> _templateCache = new Dictionary<string, Template>();
+        private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>> _templateCache =
+            new ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>>();
+        private static long _parseCount;
         public override string EngineName => "Liquid";
+
+        private readonly TemplatingOptions _options;
+
+        /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
+        public TemplatingEngine() : this(new TemplatingOptions())
+        {
+        }
+
+        /// <summary>Creates an engine that applies <paramref name="options"/> to every render.</summary>
+        /// <param name="options">The options (cache switch, allowed settings, regex time-out, XML size cap).</param>
+        public TemplatingEngine(TemplatingOptions options)
+        {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
+        }
+
+        /// <summary>Creates an engine from the options registered in dependency injection.</summary>
+        /// <param name="options">The registered options.</param>
+        public TemplatingEngine(Microsoft.Extensions.Options.IOptions<TemplatingOptions> options)
+            : this((options ?? throw new ArgumentNullException(nameof(options))).Value)
+        {
+        }
         public void Initialize()
         {
             lock (_lock)
@@ -43,46 +67,48 @@ namespace TabTabGo.Templating.Liquid
             }
         }
 
+        /// <summary>Number of template files parsed since the process started (used by tests to prove single parsing).</summary>
+        internal static long ParseCount => Interlocked.Read(ref _parseCount);
+
         public override bool IsCached(string templatePath)
         {
-            return _templateCache.ContainsKey(templatePath);
+            if (!_options.CacheTemplates || string.IsNullOrEmpty(templatePath))
+            {
+                return false;
+            }
+
+            var fullPath = Path.GetFullPath(templatePath);
+            return File.Exists(fullPath)
+                && _templateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath)), out var cached)
+                && cached.IsValueCreated;
         }
 
         public override void ParseTemplate(string templatePath)
         {
-            if (!_templateCache.ContainsKey(templatePath))
-            {
-                if (!File.Exists(templatePath))
-                {
-                    throw new Exception($"File {templatePath} doesn't exist!");
-                }
-
-                lock (_lock)
-                {
-                    var template = Template.Parse(File.ReadAllText(templatePath));
-                    _templateCache[templatePath] = template;
-                }
-            }
+            GetTemplate(templatePath);
         }
 
         public override object Render(string templatePath, object sourceData, string culture ="en-Us")
         {
             Initialize();
 
-            ParseTemplate(templatePath);
+            var template = GetTemplate(templatePath);
 
             var hash = HashIt(sourceData);
 
-            
+            // The file system travels with the render (DotLiquid reads Registers["file_system"] before the process-wide
+            // static), so parallel renders of templates in different folders never see each other's partials (B-1).
+            var fileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
             var parameters = new RenderParameters(new CultureInfo(culture))
             {
-                LocalVariables = Hash.FromDictionary(hash)
+                LocalVariables = Hash.FromDictionary(hash),
+                Registers = Hash.FromDictionary(new Dictionary<string, object> { ["file_system"] = fileSystem })
             };
 
-            Template.FileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
-            var result = _templateCache[templatePath].Render(parameters);
-
-            return result;
+            using (RenderScope.Begin(_options, fileSystem))
+            {
+                return template.Render(parameters);
+            }
         }
 
         public override string RenderString(string templateString, object sourceData, string culture ="en-Us")
@@ -93,7 +119,52 @@ namespace TabTabGo.Templating.Liquid
             {
                 LocalVariables = Hash.FromDictionary(hash)
             };
-            return template.Render(parameters);
+
+            using (RenderScope.Begin(_options, null))
+            {
+                return template.Render(parameters);
+            }
+        }
+
+        private Template GetTemplate(string templatePath)
+        {
+            var fullPath = string.IsNullOrEmpty(templatePath) ? templatePath : Path.GetFullPath(templatePath);
+            if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
+            {
+                throw new Exception($"File {templatePath} doesn't exist!");
+            }
+
+            if (!_options.CacheTemplates)
+            {
+                return ParseFile(fullPath);
+            }
+
+            // Keyed by full path and last write time: an edited file is parsed again, and relative and absolute spellings
+            // of one path share an entry (B-2).
+            var lastWrite = File.GetLastWriteTimeUtc(fullPath);
+            var key = (fullPath, lastWrite);
+            var entry = _templateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path), LazyThreadSafetyMode.ExecutionAndPublication));
+
+            foreach (var stale in _templateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
+            {
+                _templateCache.TryRemove(stale, out _);
+            }
+
+            try
+            {
+                return entry.Value;
+            }
+            catch
+            {
+                _templateCache.TryRemove(key, out _); // do not cache a failed parse
+                throw;
+            }
+        }
+
+        private static Template ParseFile(string fullPath)
+        {
+            Interlocked.Increment(ref _parseCount);
+            return Template.Parse(File.ReadAllText(fullPath));
         }
 
         public override void RegisterFilter(Type type)

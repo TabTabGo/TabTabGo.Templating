@@ -1,7 +1,8 @@
-﻿using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System;
+using System.IO;
 using System.Xml.Linq;
 using TabTabGo.IO.Utilities;
 using Newtonsoft.Json.Linq;
@@ -12,8 +13,17 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
     {
         public void CreateExcelDoc(string fileName, JObject json)
         {
+            using var file = new FileStream(fileName, FileMode.Create, FileAccess.ReadWrite);
+            CreateExcelDoc(file, json);
+        }
+
+        /// <summary>Writes the workbook described by <paramref name="json"/> into <paramref name="stream"/> (no temp file).</summary>
+        /// <param name="stream">A writable, seekable stream; it stays open.</param>
+        /// <param name="json">The workbook definition (<c>$.Workbook</c>).</param>
+        public void CreateExcelDoc(Stream stream, JObject json)
+        {
             using SpreadsheetDocument
-                document = SpreadsheetDocument.Create(fileName, SpreadsheetDocumentType.Workbook);
+                document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
             WorkbookPart workbookPart = document.AddWorkbookPart();
             workbookPart.Workbook = new Workbook();
 
@@ -112,10 +122,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// </returns>
         private Cell ConstructCell(JToken jCell, JToken styleMap, int rowIndex)
         {
-            if (!Enum.TryParse(jCell["DataType"]?.ToString(), out CellValues dataType))
-            {
-                dataType = CellValues.String;
-            }
+            var dataType = ParseDataType(jCell["DataType"]?.ToString());
 
             var cell = new Cell();
             if (dataType == CellValues.Date)
@@ -144,12 +151,37 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 //  case CellValues.InlineString:
                 //  case CellValues.String:
                 // default:
-                cell.CellValue = new CellValue(jCell["CellValue"]!.ToString());
+                var text = jCell["CellValue"]!.ToString();
+                if (dataType == CellValues.Boolean)
+                {
+                    // a boolean cell holds 1 or 0
+                    text = bool.TryParse(text, out var flag) ? (flag ? "1" : "0") : text;
+                }
+
+                cell.CellValue = new CellValue(text);
                 cell.DataType = new EnumValue<CellValues>(dataType);
                 cell.StyleIndex = GetStyleIndex(jCell, styleMap, (rowIndex > 0 && rowIndex % 2 != 0));
             }
 
             return cell;
+        }
+
+        /// <summary>
+        /// Maps the JSON data type name to <see cref="CellValues"/>. <c>CellValues</c> is a struct in Open XML SDK 3.x, so
+        /// <c>Enum.TryParse</c> throws for every cell (X-1). Unknown names fall back to <see cref="CellValues.String"/>.
+        /// </summary>
+        private static CellValues ParseDataType(string? name)
+        {
+            switch (name?.Trim().ToLowerInvariant())
+            {
+                case "number": return CellValues.Number;
+                case "boolean": return CellValues.Boolean;
+                case "date": return CellValues.Date;
+                case "error": return CellValues.Error;
+                case "sharedstring": return CellValues.SharedString;
+                case "inlinestring": return CellValues.InlineString;
+                default: return CellValues.String;
+            }
         }
 
         private UInt32Value GetStyleIndex(JToken jCell, JToken styleMap, bool useAlternative = false)

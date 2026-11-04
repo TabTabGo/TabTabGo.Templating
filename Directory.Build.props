@@ -2,7 +2,7 @@
 
   <!-- Shared version and package metadata (ADR 0001). TFM and per-project settings stay in each csproj on the v8 line. -->
   <PropertyGroup>
-    <Version>8.0.3</Version>
+    <Version>8.0.4</Version>
     <AssemblyVersion>8.0.0.0</AssemblyVersion>
     <Authors>TabTabGo</Authors>
     <Company>TabTabGo</Company>

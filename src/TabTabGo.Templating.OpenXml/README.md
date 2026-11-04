@@ -28,10 +28,15 @@ Cell expressions understand binary and `SUM` expressions (`CellExpression` famil
 ## JSON workbook mode
 
 `Render(null, data)` with `data.Workbook` describing sheets, columns and styles generates a workbook from scratch
-(`JsonSpreedSheet`). This mode could not work with Open XML SDK 3.x before 8.0.4 (bug X-1: `Enum.TryParse<CellValues>`
-throws because `CellValues` is a struct).
+(`JsonSpreedSheet`). Cell `DataType` is one of `String`, `Number`, `Boolean`, `Date`, `Error`, `SharedString`,
+`InlineString` (unknown names become `String`). Before 8.0.4 this mode threw for every cell (bug X-1).
+
+## Behaviour notes
+
+* Rendering happens in memory: no temporary file is created, even when a render fails (X-3, 8.0.4).
+* A boolean value is written as `1`/`0` in a boolean cell, so `true` shows as TRUE (X-2, 8.0.4).
 
 ## Known issues on the v8 line
 
-Booleans are written as 0 (X-2) and a 0-byte temp file is left per render (X-3) until 8.0.4. Typing, date and table
-fixes (X-4..X-19) ship on v10. See `tabtabgo/docs/templating-modernization/spec.md` section 6.4.
+Typing, date and table fixes (X-4..X-19) ship on v10. One engine instance keeps per-render state: do not share it across
+threads (B-7). See `tabtabgo/docs/templating-modernization/spec.md` section 6.4.

@@ -15,7 +15,7 @@ and can be referenced together.
 
 | Line | Branch | Target | Status |
 |---|---|---|---|
-| v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport). .NET 8 support ends 2026-11-10 |
+| v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport: AppSetting opt-in, confined includes, regex time-out, DTD-free XML, per-render file system, safe template cache, OpenXml fixes). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.0` | net10.0 | planned LTS line |
 | v11 | `releases/v11.0.x/v11.0.0` | net11.0 | planned, pre-release until .NET 11 GA |
 

@@ -100,6 +100,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TabTabGo.Templating.Dotliquid\TabTabGo.Templating.Dotliquid.csproj" />
     <ProjectReference Include="..\..\src\TabTabGo.Templating\TabTabGo.Templating.csproj" />
+    <ProjectReference Include="..\..\src\TabTabGo.Templating.OpenXml\TabTabGo.Templating.OpenXml.csproj" />
   </ItemGroup>
 
   <ItemGroup>

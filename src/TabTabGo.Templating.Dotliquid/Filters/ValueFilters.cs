@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Xml.XPath;
 using DotLiquid;
 using Microsoft.Extensions.Configuration;
@@ -14,23 +14,21 @@ namespace TabTabGo.Templating.Liquid.Filters
             {
                 return key;
             }
-            // Get Configuration from appsettings.json
-            var config = new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .Build();
-            return config[key];
+            // Only values the host put into TemplatingOptions.AppSettings are visible to templates (S-1): no file I/O,
+            // no file watcher, no access to connection strings or secrets.
+            return RenderScope.CurrentOptions.AppSettings.TryGetValue(key, out var value) ? value ?? string.Empty : string.Empty;
         }
 
         public static string FullPath(string input)
         {
             var root = Path.GetFullPath(".");
 
-            var rootProperty = Template.FileSystem.GetType().GetProperty("Root");
+            var fileSystem = (object)RenderScope.Current?.FileSystem ?? Template.FileSystem;
+            var rootProperty = fileSystem.GetType().GetProperty("Root");
             if (rootProperty != null)
             {
-                root = (string)rootProperty.GetValue(Template.FileSystem);
-            } 
+                root = (string)rootProperty.GetValue(fileSystem);
+            }
   
 
             if (string.IsNullOrEmpty(input))
@@ -74,11 +72,7 @@ namespace TabTabGo.Templating.Liquid.Filters
                 return xmlInput;
             }
 
-            XPathNavigator nav;
-            XPathDocument docNav;
-            var reader = new StringReader(xmlInput);
-            docNav = new XPathDocument(reader);
-            nav = docNav.CreateNavigator();
+            XPathNavigator nav = SafeXml.Parse(xmlInput).CreateNavigator();
 
             var node = nav.SelectSingleNode(xPath);
 
