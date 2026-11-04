@@ -81,5 +81,10 @@ once at start-up.
 
 ## Limits and known issues on the v8 line
 
+* **Shared parsed templates (fixed in 8.0.4).** `Render(path, ...)` caches the parsed template and renders from that shared
+  instance. A value set with `{% assign %}` can therefore survive into the next render of the same file, and concurrent
+  renders can see each other's assigned values. Until you move to 8.0.4, do not read a variable before assigning it in a
+  template, and do not render one template file from several threads at once.
+
 The 8.0.4 release addresses the security rows (S-1..S-5, B-1, B-2). The remaining filter and culture fixes ship on v10.
 See the specification in `tabtabgo/docs/templating-modernization/spec.md` section 6.
