@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -12,7 +12,6 @@ using DotLiquid;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Collections;
-using System.Linq.Dynamic;
 using DocumentFormat.OpenXml.Spreadsheet;
 
 namespace TabTabGo.Templating.Liquid.Filters
@@ -47,15 +46,15 @@ namespace TabTabGo.Templating.Liquid.Filters
                 case "Float":
                 case "Decimal":
                 case "Double":
-                    return CellValues.Number.ToString();
+                    return "Number";
                 case "Boolean":
-                    return CellValues.Boolean.ToString();
+                    return "Boolean";
                 case "Date":
                 case "DateTime":
                 case "DateTimeOffset":
-                    return CellValues.Date.ToString();
+                    return "Date";
                 default:
-                    return CellValues.String.ToString();
+                    return "String";
             }
         }
 

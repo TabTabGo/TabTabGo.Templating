@@ -9,11 +9,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{14D4EA0E-9
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Templating", "src\TabTabGo.Templating\TabTabGo.Templating.csproj", "{B9B29EC1-4361-48EE-8AEE-58F356E9E85A}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{335C3E09-6203-4F47-914E-1553DD471B25}"
-	ProjectSection(SolutionItems) = preProject
-		tools\PackagAndPush.sh = tools\PackagAndPush.sh
-	EndProjectSection
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Templating.Dotliquid", "src\TabTabGo.Templating.Dotliquid\TabTabGo.Templating.Dotliquid.csproj", "{23FAA961-6932-443E-BF69-BFEB00B38402}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TabTabGo.Templating.OpenXml", "src\TabTabGo.Templating.OpenXml\TabTabGo.Templating.OpenXml.csproj", "{C1CB72EA-8EA8-4049-8208-3B7723782154}"

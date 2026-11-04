@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,6 +13,16 @@ namespace TabTabGo.Templating.Liquid.Filters
 {
     public static class CollectionFilters
     {
+        /// <summary>
+        /// Parsing rules for the <c>Filter</c> filter (ADR 0002). System.Linq.Dynamic.Core 1.6+ blocks
+        /// <c>ToString()</c>/<c>Equals()</c> on <c>object</c> by default, which existing templates rely on
+        /// (<c>it["k"].ToString() = "v"</c>). Reflection over types outside the predefined set stays blocked.
+        /// </summary>
+        private static readonly ParsingConfig DynamicLinqParsingConfig = new ParsingConfig
+        {
+            AllowEqualsAndToStringMethodsOnObject = true,
+        };
+
         public static object SelectMany(IEnumerable array, string property)
         {
             if (string.IsNullOrEmpty(property))
@@ -126,7 +136,7 @@ namespace TabTabGo.Templating.Liquid.Filters
         {
             if (array == null)
                 return null;
-            var filteredArray = array.Cast<Hash>().AsQueryable<Hash>().Where(criteria).ToList();
+            var filteredArray = array.Cast<Hash>().AsQueryable<Hash>().Where(DynamicLinqParsingConfig, criteria).ToList();
             return filteredArray;
         }
 
