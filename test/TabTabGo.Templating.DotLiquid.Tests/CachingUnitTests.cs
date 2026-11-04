@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 using Newtonsoft.Json.Linq;
 using System.IO;
@@ -7,6 +7,7 @@ using Xunit;
 namespace TabTabGo.Templating.DotLiquid.Tests
 {
     
+    [Collection("liquid-static")]
     public class CachingUnitTests
     {
         [Fact]
