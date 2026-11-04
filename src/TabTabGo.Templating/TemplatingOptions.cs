@@ -29,6 +29,13 @@ namespace TabTabGo.Templating
         public IDictionary<string, string?> AppSettings { get; } =
             new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
+        /// <summary>
+        /// Folder the OpenXml JSON-workbook mode may load stylesheets from (<c>Workbook.Stylesheets.TemplatePath</c>). A relative
+        /// value is resolved against the application base directory; when unset the base directory itself is the root.
+        /// Independent of <see cref="TemplatesPath"/>.
+        /// </summary>
+        public string? StylesheetRoot { get; set; }
+
         /// <summary>Time-out of regular expressions evaluated by template filters. Default 200 ms.</summary>
         public TimeSpan RegexTimeout { get; set; } = TimeSpan.FromMilliseconds(200);
 

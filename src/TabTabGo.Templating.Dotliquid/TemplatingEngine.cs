@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text.RegularExpressions;
 using System.Threading;
 using DotLiquid;
 using System;
@@ -26,8 +25,6 @@ namespace TabTabGo.Templating.Liquid
         private static long _parseCount;
         public override string EngineName => "Liquid";
 
-        private static readonly TimeSpan MaxRegexTimeout = TimeSpan.FromMilliseconds(int.MaxValue - 1);
-        private const string RegexTimeoutOutput = "Liquid error: regular expression time-out";
         private readonly TemplatingOptions _options;
 
         /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
@@ -39,17 +36,7 @@ namespace TabTabGo.Templating.Liquid
         /// <param name="options">The options (cache switch, allowed settings, regex time-out, XML size cap).</param>
         public TemplatingEngine(TemplatingOptions options)
         {
-            _options = options ?? throw new ArgumentNullException(nameof(options));
-            if (options.RegexTimeout != Timeout.InfiniteTimeSpan
-                && (options.RegexTimeout <= TimeSpan.Zero || options.RegexTimeout > MaxRegexTimeout))
-            {
-                throw new ArgumentOutOfRangeException(nameof(options), "RegexTimeout must be positive (or Timeout.InfiniteTimeSpan).");
-            }
-
-            if (options.MaxXmlCharacters < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(options), "MaxXmlCharacters must not be negative (0 = unlimited).");
-            }
+            _options = TemplatingOptionsValidator.Validate(options, validateRegexTimeout: true);
         }
 
         /// <summary>Creates an engine from the options registered in dependency injection.</summary>
@@ -136,14 +123,9 @@ namespace TabTabGo.Templating.Liquid
 
             using (RenderScope.Begin(_options, fileSystem))
             {
-                try
-                {
-                    return template.Render(RenderParameters.FromContext(context, cultureInfo));
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    return RegexTimeoutOutput; // DotLiquid's built-in Replace/ReplaceFirst throw this out of Render
-                }
+                // A regex time-out in DotLiquid's built-in Replace/ReplaceFirst propagates as RegexMatchTimeoutException: the
+                // render failed, and a failure must not look like a successful (e-mail body, report) result.
+                return template.Render(RenderParameters.FromContext(context, cultureInfo));
             }
         }
 
@@ -168,14 +150,7 @@ namespace TabTabGo.Templating.Liquid
 
             using (RenderScope.Begin(_options, fileSystem))
             {
-                try
-                {
-                    return template.Render(parameters);
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    return RegexTimeoutOutput;
-                }
+                return template.Render(parameters);
             }
         }
 

@@ -39,7 +39,7 @@ public sealed class StylesheetPathTests : IDisposable
         }
         """.Replace("__PATH__", templatePath.Replace("\\", "\\\\")));
 
-    private Engine EngineWithRoot() => new(new TemplatingOptions { TemplatesPath = _root });
+    private Engine EngineWithRoot() => new(new TemplatingOptions { StylesheetRoot = _root });
 
     [Fact]
     public void Stylesheet_ValidRelativePath_Loads()
@@ -48,6 +48,42 @@ public sealed class StylesheetPathTests : IDisposable
 
         using var document = SpreadsheetDocument.Open(result, false);
         Assert.Single(document.WorkbookPart!.WorkbookStylesPart!.Stylesheet.Descendants<Font>());
+    }
+
+    [Fact]
+    public void Stylesheet_TemplatesPathIsNotTheStylesheetRoot()
+    {
+        var engine = new Engine(new TemplatingOptions { TemplatesPath = _root, StylesheetRoot = Path.Combine(_base, "other") });
+
+        Assert.ThrowsAny<Exception>(() => engine.Render("", Workbook("styles.xml")));
+    }
+
+    [Fact]
+    public void Stylesheet_RelativeStylesheetRoot_IsResolvedAgainstTheBaseDirectory()
+    {
+        var folder = "ttg-rel-" + Guid.NewGuid().ToString("N");
+        var absolute = Path.Combine(AppContext.BaseDirectory, folder);
+        Directory.CreateDirectory(absolute);
+        File.WriteAllText(Path.Combine(absolute, "styles.xml"), StyleXml);
+        var original = Directory.GetCurrentDirectory();
+        try
+        {
+            Directory.SetCurrentDirectory(_base); // a current-directory resolution would not find the file
+            using var result = Assert.IsType<MemoryStream>(new Engine(new TemplatingOptions { StylesheetRoot = folder }).Render("", Workbook("styles.xml")));
+            Assert.True(result.Length > 0);
+        }
+        finally
+        {
+            Directory.SetCurrentDirectory(original);
+            Directory.Delete(absolute, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Constructors_NegativeMaxXmlCharacters_Throw()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Engine(new TemplatingOptions { MaxXmlCharacters = -1 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new TabTabGo.Templating.OpenXml.SpreadSheet.JsonSpreedSheet(new TemplatingOptions { MaxXmlCharacters = -1 }));
     }
 
     [Fact]

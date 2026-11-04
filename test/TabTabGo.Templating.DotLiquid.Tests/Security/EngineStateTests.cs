@@ -199,7 +199,7 @@ public sealed class EngineStateTests : IDisposable
     [Fact]
     public void Regex_UsesConfiguredTimeout()
     {
-        using var scope = RenderScope.Begin(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(20) }, null);
+        using var scope = RenderScope.Begin(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(50) }, null);
         var watch = System.Diagnostics.Stopwatch.StartNew();
 
         var result = ValueFilters.GetMatch(new string('a', 40) + "!", "^(a+)+$");

@@ -34,7 +34,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="options">The options.</param>
         public TemplatingEngine(TemplatingOptions options)
         {
-            _options = options ?? throw new ArgumentNullException(nameof(options));
+            _options = TemplatingOptionsValidator.Validate(options, validateRegexTimeout: false);
         }
 
         /// <summary>Creates an engine from the options registered in dependency injection.</summary>

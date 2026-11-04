@@ -37,6 +37,7 @@ v10. Until then bind the section yourself with `IConfiguration.GetSection("TabTa
 | `CacheTemplates` | `true` | cache parsed templates by full path and last write time; an edited file is parsed again |
 | `AppSettings` | empty | the only values the `AppSetting` filter can return (keys are case-insensitive) |
 | `RegexTimeout` | 200 ms | time-out of regular expressions run by template filters (`GetMatch`) |
+| `StylesheetRoot` | `null` | OpenXml JSON-workbook stylesheets are loaded only from here (relative: against the application base directory; default: the base directory) |
 | `MaxXmlCharacters` | 10 000 000 | size cap of XML parsed by `XPathSelect`/`XPathSelectMany` (DTDs are always rejected) |
 
 ```csharp
@@ -51,7 +52,7 @@ services.AddTabTabGoTemplating(o => o.AppSettings["Brand"] = "Acme"); // or in c
 Pass the options to an engine with `new Liquid.TemplatingEngine(options)` or `new Liquid.TemplatingEngine(IOptions<TemplatingOptions>)`
 (the OpenXml engine has the same two constructors).
 
-`TemplatingOptions` is validated by the **Liquid** engine constructors only (the OpenXml engine just rejects null): `RegexTimeout` must be positive (or `Timeout.InfiniteTimeSpan`) and
+`TemplatingOptions` is validated by the engine constructors (both engines check `MaxXmlCharacters`; only the Liquid engine checks `RegexTimeout`): `RegexTimeout` must be positive (or `Timeout.InfiniteTimeSpan`) and
 `MaxXmlCharacters` must not be negative (0 means unlimited). Validation happens once, at construction: changing a property of the options object afterwards is not re-validated.
 
 **Dependency injection.** The engines have three constructors (`()`, `(TemplatingOptions)`, `(IOptions<TemplatingOptions>)`).

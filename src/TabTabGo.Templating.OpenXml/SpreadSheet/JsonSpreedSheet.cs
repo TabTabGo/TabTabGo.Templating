@@ -17,11 +17,11 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         {
         }
 
-        /// <summary>Creates a writer that loads data-referenced stylesheets only from <see cref="TemplatingOptions.TemplatesPath"/>.</summary>
+        /// <summary>Creates a writer that loads data-referenced stylesheets only from <see cref="TemplatingOptions.StylesheetRoot"/>.</summary>
         /// <param name="options">The options.</param>
         public JsonSpreedSheet(TemplatingOptions options)
         {
-            _options = options ?? throw new ArgumentNullException(nameof(options));
+            _options = TemplatingOptionsValidator.Validate(options, validateRegexTimeout: false);
         }
 
         public void CreateExcelDoc(string fileName, JObject json)
@@ -181,7 +181,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         /// <summary>
         /// Loads a stylesheet whose path comes from the data (S-7). The path must be relative and stay inside
-        /// <see cref="TemplatingOptions.TemplatesPath"/> (the application base directory when it is not set); rooted, UNC and
+        /// <see cref="TemplatingOptions.StylesheetRoot"/> (a relative root is resolved against the application base directory, which is also the default); rooted, UNC and
         /// traversing paths are rejected without echoing any absolute path, and the XML may not contain a DTD.
         /// </summary>
         private XDocument LoadStylesheet(string? requested)
@@ -191,21 +191,23 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 || requested.StartsWith("\\\\", StringComparison.Ordinal)
                 || requested.StartsWith("//", StringComparison.Ordinal))
             {
-                throw new ArgumentException("The stylesheet path must be relative to the templates folder.", nameof(requested));
+                throw new ArgumentException("The stylesheet path must be relative to the stylesheet root.", nameof(requested));
             }
 
-            var root = Path.GetFullPath(string.IsNullOrEmpty(_options.TemplatesPath) ? AppContext.BaseDirectory : _options.TemplatesPath)
+            // never TemplatesPath: the folder of liquid/xlsx templates is not automatically a folder of stylesheets
+            var configured = string.IsNullOrEmpty(_options.StylesheetRoot) ? AppContext.BaseDirectory : _options.StylesheetRoot;
+            var root = Path.GetFullPath(configured, AppContext.BaseDirectory)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var full = Path.GetFullPath(Path.Combine(root, requested));
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             if (!full.StartsWith(root, comparison))
             {
-                throw new ArgumentException("The stylesheet path is outside the templates folder.", nameof(requested));
+                throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
             }
 
             if (!File.Exists(full))
             {
-                throw new FileNotFoundException("The stylesheet was not found in the templates folder.");
+                throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
             }
 
             var settings = new System.Xml.XmlReaderSettings

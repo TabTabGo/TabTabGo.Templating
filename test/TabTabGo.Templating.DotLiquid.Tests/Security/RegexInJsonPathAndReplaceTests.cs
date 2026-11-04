@@ -1,5 +1,7 @@
 using System;
 using System.Diagnostics;
+using System.IO;
+using System.Text.RegularExpressions;
 using System.Linq;
 using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
@@ -79,19 +81,42 @@ public class RegexInJsonPathAndReplaceTests
     [Theory]
     [InlineData("Replace")]
     [InlineData("ReplaceFirst")]
-    public void BuiltInReplace_CatastrophicPattern_StopsAtTheConfiguredTimeoutWithoutEscaping(string filter)
+    public void BuiltInReplace_CatastrophicPattern_ThrowsRegexTimeoutWithinTheLimit_FromRenderString(string filter)
     {
         var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(200) });
         engine.Initialize();
         var input = new string('a', 30) + "!";
-        var watch = Stopwatch.StartNew();
-        string? result = null;
 
-        var task = Task.Run(() => result = engine.RenderString("[{{ s | " + filter + ": '^(a+)+$', 'x' }}]", new { s = input }, "en-US"));
+        var task = Task.Run(() => engine.RenderString("[{{ s | " + filter + ": '^(a+)+$', 'x' }}]", new { s = input }, "en-US"));
 
-        Assert.True(task.Wait(TimeSpan.FromSeconds(4)), $"{filter} ran for {watch.Elapsed}: DotLiquid's 10 s default time-out is still in force");
-        Assert.NotNull(result);
-        Assert.Contains("Liquid error", result);
+        Assert.True(((IAsyncResult)task).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(4)), $"{filter}: DotLiquid's 10 s default time-out is still in force");
+        var error = Assert.Throws<AggregateException>(() => task.Wait());
+        Assert.IsType<RegexMatchTimeoutException>(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData("Replace")]
+    [InlineData("ReplaceFirst")]
+    public void BuiltInReplace_CatastrophicPattern_ThrowsRegexTimeoutWithinTheLimit_FromRender(string filter)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "ttg-rx-" + Guid.NewGuid().ToString("N") + ".liquid");
+        File.WriteAllText(path, "[{{ s | " + filter + ": '^(a+)+$', 'x' }}]");
+        try
+        {
+            var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(200) });
+            engine.Initialize();
+            var input = new string('a', 30) + "!";
+
+            var task = Task.Run(() => engine.Render(path, new { s = input }, "en-US"));
+
+            Assert.True(((IAsyncResult)task).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(4)), $"{filter}: still running after 4 s");
+            var error = Assert.Throws<AggregateException>(() => task.Wait());
+            Assert.IsType<RegexMatchTimeoutException>(error.InnerException);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 
     [Fact]
