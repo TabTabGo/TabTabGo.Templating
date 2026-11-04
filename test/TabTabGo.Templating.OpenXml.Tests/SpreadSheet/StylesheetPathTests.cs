@@ -126,6 +126,48 @@ public sealed class StylesheetPathTests : IDisposable
     }
 
     [Fact]
+    public void Stylesheet_WithDtd_Rejected()
+    {
+        // well-formed, DOCTYPE name equals the root element and the entity is used: only DtdProcessing.Prohibit stops it
+        File.WriteAllText(
+            Path.Combine(_root, "entity.xml"),
+            "<!DOCTYPE styleSheet [<!ENTITY size \"11\">]><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+            + "<fonts count=\"1\"><font><sz val=\"&size;\"/></font></fonts></styleSheet>");
+
+        var error = Assert.ThrowsAny<System.Xml.XmlException>(() => EngineWithRoot().Render("", Workbook("entity.xml")));
+
+        // The Open XML SDK also refuses DTDs later (same message), so also require that OUR loader is the one that rejected it;
+        // otherwise changing DtdProcessing.Prohibit to Parse would go unnoticed.
+        Assert.Contains("LoadStylesheet", error.StackTrace);
+    }
+
+    /// <summary>
+    /// The pre-check (rooted / UNC) must reject these itself: without it an absolute path inside the root would load, and the
+    /// UNC spellings would only be caught later by the root or file checks, with a different message.
+    /// </summary>
+    [Fact]
+    public void Stylesheet_AbsolutePathInsideTheRoot_RejectedByThePreCheck()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "styles"));
+        File.WriteAllText(Path.Combine(_root, "styles", "ok.xml"), StyleXml);
+        var absoluteInside = Path.Combine(_root, "styles", "ok.xml");
+
+        var error = Assert.Throws<ArgumentException>(() => EngineWithRoot().Render("", Workbook(absoluteInside)));
+
+        Assert.Contains("must be relative", error.Message);
+    }
+
+    [Theory]
+    [InlineData("\\\\server\\share\\x.xml")]
+    [InlineData("//server/share/x.xml")]
+    public void Stylesheet_UncPaths_RejectedByThePreCheck(string path)
+    {
+        var error = Assert.Throws<ArgumentException>(() => EngineWithRoot().Render("", Workbook(path)));
+
+        Assert.Contains("must be relative", error.Message);
+    }
+
+    [Fact]
     public void Stylesheet_MissingFile_ThrowsWithoutAbsolutePath()
     {
         var error = Assert.ThrowsAny<Exception>(() => EngineWithRoot().Render("", Workbook("nope.xml")));

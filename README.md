@@ -57,6 +57,12 @@ Pack locally without publishing:
 dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.3 -o out
 ```
 
+## Release notes 8.0.4
+
+Callers (e-mail and report services) must now catch `RegexMatchTimeoutException` from `Render`/`RenderString`: a catastrophic regex in
+DotLiquid's built-in `Replace`/`ReplaceFirst` stops at `TemplatingOptions.RegexTimeout` (200 ms by default; 6.0.5 and 8.0.3 stopped after 10 s)
+and the exception propagates instead of producing output.
+
 ## Upgrading from 6.0.5
 
 | Change | Impact |
