@@ -44,6 +44,7 @@ public sealed class IncludeConfinementTests : IDisposable
         var result = (string)new Liquid.TemplatingEngine().Render(templatePath, new { });
 
         Assert.DoesNotContain("TOPSECRET", result);
+        Assert.Contains("Illegal template path", result);
     }
 
     [Fact]
@@ -67,12 +68,12 @@ public sealed class IncludeConfinementTests : IDisposable
     public void Include_SiblingDirectorySharingRootPrefix_Throws()
     {
         var root = MakeRoot();
-        var sibling = root + "-evil";
+        var sibling = root + "evil"; // hyphen-free, so the name pattern accepts it and only the root check can reject it
         Directory.CreateDirectory(sibling);
         File.WriteAllText(Path.Combine(sibling, "_loot.liquid"), "LOOT");
         var fs = new EnhancedLocalFileSystem(root);
 
-        Assert.Throws<FileSystemException>(() => fs.FullPath("../root-evil/loot"));
+        Assert.Throws<FileSystemException>(() => fs.FullPath("../rootevil/loot"));
     }
 
     [Fact]

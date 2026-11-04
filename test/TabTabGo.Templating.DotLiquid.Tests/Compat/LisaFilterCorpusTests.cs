@@ -35,7 +35,7 @@ public class LisaFilterCorpusTests
     public void Filter_LisaCorpus_Unchanged(string expression, string expectedIds)
     {
         var engine = new Liquid.TemplatingEngine();
-        engine.Initialize(); // RenderString does not (bug B-4, fixed in 8.0.4)
+        engine.Initialize(); // RenderString does not initialise the engine (bug B-4, fixed on v10)
         const string template =
             "{% assign r = items | Filter: expr %}{% for i in r %}{{ i.id }}{% unless forloop.last %},{% endunless %}{% endfor %}";
 

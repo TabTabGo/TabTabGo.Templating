@@ -142,10 +142,12 @@ public sealed class EngineStateTests : IDisposable
     [Fact]
     public void AppSetting_HostSettingsFileInCurrentDirectory_IsNotRead()
     {
-        var path = Path.Combine(Directory.GetCurrentDirectory(), "appsettings.json");
-        var existed = File.Exists(path);
-        Assert.False(existed, "test needs a clean working directory");
-        File.WriteAllText(path, "{ \"Secret\": \"s3cr3t\" }");
+        // private working directory (restored afterwards): nothing is written into the test output folder
+        var original = Directory.GetCurrentDirectory();
+        var workDir = Path.Combine(_base, "cwd");
+        Directory.CreateDirectory(workDir);
+        File.WriteAllText(Path.Combine(workDir, "appsettings.json"), "{ \"Secret\": \"s3cr3t\" }");
+        Directory.SetCurrentDirectory(workDir);
         try
         {
             var engine = new Liquid.TemplatingEngine(new TemplatingOptions());
@@ -157,7 +159,7 @@ public sealed class EngineStateTests : IDisposable
         }
         finally
         {
-            File.Delete(path);
+            Directory.SetCurrentDirectory(original);
         }
     }
 

@@ -39,7 +39,14 @@ the **thread** unless the template passes a culture argument (bug B-6, fixed on 
 `{% include 'name' %}` and `{% extends 'layout' %}` read `_name.liquid` from the directory of the template that is being
 rendered. The partial must stay under that directory: names that are rooted, that climb out of it with `..`, or that come
 from a non-string variable fail with `FileSystemException`. The file system belongs to the render (not to a process-wide
-static), so templates in different folders can render in parallel.
+static), so templates in different folders resolve their own partials when rendered concurrently, and each render starts
+from its own context: values set with `{% assign %}` or `{% capture %}` never carry over to another render of the same
+file. Use one engine instance per thread (or serialise calls): an instance still keeps a hash cache that is not thread-safe
+(bug B-3, fixed on v10).
+
+`RenderString` parses on every call and has no template folder of its own. Includes inside a string template resolve
+against `TemplatingOptions.TemplatesPath` when it is set (confined to that folder, like `Render`); otherwise DotLiquid falls
+back to a file system the host assigned to `Template.FileSystem`, as before 8.0.4.
 
 ## Filters
 
@@ -74,14 +81,16 @@ types outside the predefined set is blocked by the library. Do not build express
 
 Prefer these to `Filter` when the value comes from data: `{{ items | FilterBy: 'status', 'active' }}` keeps the items whose
 `status` equals `active` (compared as text), `{{ items | FilterByPrefix: 'name', 'Al' }}` keeps those starting with `Al`
-(ordinal). No expression is parsed.
+(ordinal). No expression is parsed. `Filter`'s `.StartsWith("x")` is culture-sensitive, so the two differ for characters
+that ICU ignores (for example a soft hyphen).
 
 ### `AppSetting`, `GetMatch`, `XPathSelect`
 
 * `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is an empty string.
   Host configuration files are never read.
 * `GetMatch` stops after `TemplatingOptions.RegexTimeout` and returns an empty string.
-* `XPathSelect`/`XPathSelectMany` reject XML with a DTD and documents larger than `MaxXmlCharacters`.
+* `XPathSelect`/`XPathSelectMany` reject any XML that has a `<!DOCTYPE ...>` (even a plain `<!DOCTYPE html>`, which renders
+  as `Liquid error`) and documents larger than `MaxXmlCharacters`. Strip the DOCTYPE before passing XML to the filter.
 
 ### Custom filters
 
@@ -97,4 +106,4 @@ once at start-up.
 
 Fixed on v10, not on v8: filter, culture and typing bugs F-1..F-17, the per-instance hash cache (B-3: do not share one
 engine instance across threads on v8; create one per render or serialise), and `RenderString` not initialising the engine
-(B-4). The 8.0.4 release closes S-1..S-5, B-1 and B-2. See `tabtabgo/docs/templating-modernization/spec.md` section 6.
+(B-4). The 8.0.4 release closes S-1..S-5, B-1 and B-2 and the shared-template leak. See `tabtabgo/docs/templating-modernization/spec.md` section 6.

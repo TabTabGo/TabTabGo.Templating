@@ -40,12 +40,13 @@ namespace TabTabGo.Templating.Liquid
                 throw new FileSystemException("Illegal template name", templatePath);
 
             string fullPath = templatePath.Contains("/")
-                ? Path.Combine(Path.Combine(Root, Path.GetDirectoryName(templatePath)), string.Format("_{0}.liquid", Path.GetFileName(templatePath)))
-                : Path.Combine(Root, string.Format("_{0}.liquid", templatePath));
+                ? Path.Combine(Path.Combine(Root ?? string.Empty, Path.GetDirectoryName(templatePath)), string.Format("_{0}.liquid", Path.GetFileName(templatePath)))
+                : Path.Combine(Root ?? string.Empty, string.Format("_{0}.liquid", templatePath));
 
             // Compare normalised paths with a trailing separator on the root: a plain prefix test accepts "/rootEvil" for
             // "/root", and an unescaped root is a regular expression (S-3).
-            var normalizedRoot = Path.GetFullPath(Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            // an empty root (a template given as a bare file name) means the current directory
+            var normalizedRoot = Path.GetFullPath(string.IsNullOrEmpty(Root) ? "." : Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                 + Path.DirectorySeparatorChar;
             var normalizedPath = Path.GetFullPath(fullPath);
             var comparison = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)

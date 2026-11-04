@@ -47,6 +47,10 @@ Packages are published **only from tags**. There is no publish from `master` or 
    branch, version equals the tag, version not yet on nuget.org), builds, tests, scans, packs, and publishes through
    nuget.org trusted publishing. Stable tags wait for approval of the `nuget-stable` environment.
 
+If a publish run fails part-way (some packages pushed, others not), do not re-run it: re-runs are refused and `dotnet nuget
+push` is run without `--skip-duplicate`. Fix the cause, bump the patch version in `Directory.Build.props` on the release
+branch and tag the new version.
+
 Pack locally without publishing:
 
 ```bash

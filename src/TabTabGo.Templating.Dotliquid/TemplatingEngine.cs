@@ -25,6 +25,7 @@ namespace TabTabGo.Templating.Liquid
         private static long _parseCount;
         public override string EngineName => "Liquid";
 
+        private static readonly TimeSpan MaxRegexTimeout = TimeSpan.FromMilliseconds(int.MaxValue - 1);
         private readonly TemplatingOptions _options;
 
         /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
@@ -37,6 +38,16 @@ namespace TabTabGo.Templating.Liquid
         public TemplatingEngine(TemplatingOptions options)
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
+            if (options.RegexTimeout != Timeout.InfiniteTimeSpan
+                && (options.RegexTimeout <= TimeSpan.Zero || options.RegexTimeout > MaxRegexTimeout))
+            {
+                throw new ArgumentOutOfRangeException(nameof(options), "RegexTimeout must be positive (or Timeout.InfiniteTimeSpan).");
+            }
+
+            if (options.MaxXmlCharacters < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(options), "MaxXmlCharacters must not be negative (0 = unlimited).");
+            }
         }
 
         /// <summary>Creates an engine from the options registered in dependency injection.</summary>
@@ -92,27 +103,36 @@ namespace TabTabGo.Templating.Liquid
         {
             Initialize();
 
-            var template = GetTemplate(templatePath);
+            var (template, fullPath) = GetTemplate(templatePath);
 
             var hash = HashIt(sourceData);
 
-            // The file system travels with the render (DotLiquid reads Registers["file_system"] before the process-wide
-            // static), so parallel renders of templates in different folders never see each other's partials (B-1).
-            var fileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
-            var parameters = new RenderParameters(new CultureInfo(culture))
-            {
-                LocalVariables = Hash.FromDictionary(hash),
-                Registers = Hash.FromDictionary(new Dictionary<string, object> { ["file_system"] = fileSystem })
-            };
+            // The file system is resolved from the full path (a bare "main.liquid" has an empty directory name) and
+            // travels with the render: DotLiquid reads Registers["file_system"] before the process-wide static (B-1).
+            var fileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(fullPath));
+            var cultureInfo = new CultureInfo(culture);
+
+            // The parsed template is cached and shared by every render, so each render gets its own Context. Rendering
+            // through the template's own Registers/InstanceAssigns would let {% assign %} values and registers of one
+            // render appear in the next one (or in a parallel one).
+            var context = new Context(
+                new List<Hash> { Hash.FromDictionary(hash) },
+                new Hash(),
+                Hash.FromDictionary(new Dictionary<string, object> { ["file_system"] = fileSystem }),
+                ErrorsOutputMode.Display,
+                0,
+                0,
+                cultureInfo);
 
             using (RenderScope.Begin(_options, fileSystem))
             {
-                return template.Render(parameters);
+                return template.Render(RenderParameters.FromContext(context, cultureInfo));
             }
         }
 
         public override string RenderString(string templateString, object sourceData, string culture ="en-Us")
         {
+            // Parsed per call, so nothing is shared between renders.
             var template = Template.Parse(templateString);
             var hash = HashIt(sourceData);
             var parameters = new RenderParameters(new CultureInfo(culture))
@@ -120,13 +140,22 @@ namespace TabTabGo.Templating.Liquid
                 LocalVariables = Hash.FromDictionary(hash)
             };
 
-            using (RenderScope.Begin(_options, null))
+            // With TemplatesPath set, includes resolve (confined) against it. Without it DotLiquid falls back to a file
+            // system the host assigned to Template.FileSystem, as before 8.0.4.
+            EnhancedLocalFileSystem fileSystem = null;
+            if (!string.IsNullOrEmpty(_options.TemplatesPath))
+            {
+                fileSystem = new EnhancedLocalFileSystem(Path.GetFullPath(_options.TemplatesPath));
+                parameters.Registers = Hash.FromDictionary(new Dictionary<string, object> { ["file_system"] = fileSystem });
+            }
+
+            using (RenderScope.Begin(_options, fileSystem))
             {
                 return template.Render(parameters);
             }
         }
 
-        private Template GetTemplate(string templatePath)
+        private (Template Template, string FullPath) GetTemplate(string templatePath)
         {
             var fullPath = string.IsNullOrEmpty(templatePath) ? templatePath : Path.GetFullPath(templatePath);
             if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
@@ -136,7 +165,7 @@ namespace TabTabGo.Templating.Liquid
 
             if (!_options.CacheTemplates)
             {
-                return ParseFile(fullPath);
+                return (ParseFile(fullPath), fullPath);
             }
 
             // Keyed by full path and last write time: an edited file is parsed again, and relative and absolute spellings
@@ -152,7 +181,7 @@ namespace TabTabGo.Templating.Liquid
 
             try
             {
-                return entry.Value;
+                return (entry.Value, fullPath);
             }
             catch
             {
@@ -164,7 +193,9 @@ namespace TabTabGo.Templating.Liquid
         private static Template ParseFile(string fullPath)
         {
             Interlocked.Increment(ref _parseCount);
-            return Template.Parse(File.ReadAllText(fullPath));
+            var template = Template.Parse(File.ReadAllText(fullPath));
+            template.MakeThreadSafe(); // the instance is shared; renders use their own Context (see Render)
+            return template;
         }
 
         public override void RegisterFilter(Type type)

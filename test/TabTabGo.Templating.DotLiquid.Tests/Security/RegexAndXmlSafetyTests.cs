@@ -44,6 +44,15 @@ public class RegexAndXmlSafetyTests
         Assert.Throws<XmlException>(() => CollectionFilters.XPathSelectMany(Bomb, "/a"));
     }
 
+    [Theory]
+    [InlineData("<!DOCTYPE note SYSTEM \"note.dtd\"><note><to>x</to></note>")]
+    [InlineData("<!DOCTYPE html><html><body>x</body></html>")]
+    public void XPathSelect_AnyDoctype_IsRejected_EvenWithoutEntities(string xml)
+    {
+        Assert.Throws<XmlException>(() => ValueFilters.XPathSelect(xml, "/*"));
+        Assert.Throws<XmlException>(() => CollectionFilters.XPathSelectMany(xml, "/*"));
+    }
+
     [Fact]
     public void XPathSelect_Simple_Works()
     {

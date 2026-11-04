@@ -50,3 +50,11 @@ services.AddTabTabGoTemplating(o => o.AppSettings["Brand"] = "Acme"); // or in c
 
 Pass the options to an engine with `new Liquid.TemplatingEngine(options)` or `new Liquid.TemplatingEngine(IOptions<TemplatingOptions>)`
 (the same two constructors exist on the OpenXml engine).
+
+`TemplatingOptions` is validated by the engine constructors: `RegexTimeout` must be positive (or `Timeout.InfiniteTimeSpan`) and
+`MaxXmlCharacters` must not be negative (0 means unlimited).
+
+**Dependency injection.** The engines have three constructors (`()`, `(TemplatingOptions)`, `(IOptions<TemplatingOptions>)`).
+`AddTabTabGoTemplating` registers `IOptions<TemplatingOptions>`. If a host also registers `TemplatingOptions` itself,
+Microsoft DI reports an ambiguous constructor when it builds an engine: register the engine with a factory
+(`sp => new Liquid.TemplatingEngine(sp.GetRequiredService<IOptions<TemplatingOptions>>())`).

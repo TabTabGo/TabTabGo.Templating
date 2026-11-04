@@ -7,7 +7,7 @@ namespace TabTabGo.Templating.Liquid
     /// <summary>
     /// Per-render ambient state (options and the template file system). DotLiquid filters are static methods that cannot
     /// receive the engine instance, so the engine opens a scope around each render and the filters read
-    /// <see cref="Current"/>. The scope flows with the logical call context, so parallel renders never see each other.
+    /// <see cref="Current"/>. The scope flows with the logical call context, so concurrent renders do not see each other's scope.
     /// </summary>
     internal sealed class RenderScope : IDisposable
     {

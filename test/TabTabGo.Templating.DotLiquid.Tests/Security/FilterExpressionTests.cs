@@ -43,6 +43,40 @@ public class FilterExpressionTests
 
         Assert.DoesNotContain("System.Private.CoreLib", result);
         Assert.DoesNotContain("[1]", result);
+        Assert.Contains("Liquid error", result);
+    }
+
+    [Fact]
+    public void Render_BenignDataBuiltFilterExpression_StillFilters()
+    {
+        var engine = new Liquid.TemplatingEngine();
+        engine.Initialize();
+        const string template = "{% assign expr = 'it[\"name\"].ToString() = \"' | Append: wanted | Append: '\"' %}{% assign r = rows | Filter: expr %}[{{ r | Size }}]";
+
+        var hit = engine.RenderString(template, JObject.Parse("""{ "rows": [ { "id": 1, "name": "x" } ], "wanted": "x" }"""), "en-US");
+        var miss = engine.RenderString(template, JObject.Parse("""{ "rows": [ { "id": 1, "name": "x" } ], "wanted": "y" }"""), "en-US");
+
+        Assert.Equal("[1]", hit);
+        Assert.Equal("[0]", miss);
+    }
+
+    /// <summary>
+    /// FilterByPrefix compares ordinally; the dynamic expression's StartsWith(string) is culture-sensitive, so they
+    /// differ for characters ICU ignores (here a soft hyphen). Pinned so nobody assumes they are interchangeable.
+    /// </summary>
+    [Fact]
+    public void FilterByPrefix_IsOrdinal_WhileDynamicStartsWithIsCultureSensitive()
+    {
+        using var _ = new TabTabGo.Templating.DotLiquid.Tests.Support.CultureScope("en-US");
+        if (!"\u00ADAl".StartsWith("Al"))
+        {
+            return; // no ICU culture comparison available (invariant globalization): nothing to pin
+        }
+
+        var rows = new List<object> { new Hash { ["id"] = 1, ["name"] = "\u00ADAlice" } };
+
+        Assert.Equal("1", Ids(CollectionFilters.Filter(rows, "it[\"name\"].ToString().StartsWith(\"Al\")")));
+        Assert.Equal("", Ids(CollectionFilters.FilterByPrefix(rows, "name", "Al")));
     }
 
     [Fact]

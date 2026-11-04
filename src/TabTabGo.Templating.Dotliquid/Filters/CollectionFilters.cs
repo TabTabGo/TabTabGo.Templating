@@ -21,6 +21,7 @@ namespace TabTabGo.Templating.Liquid.Filters
         private static readonly ParsingConfig DynamicLinqParsingConfig = new ParsingConfig
         {
             AllowEqualsAndToStringMethodsOnObject = true,
+            AllowNewToEvaluateAnyType = false,
         };
 
         public static object SelectMany(IEnumerable array, string property)
