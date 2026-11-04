@@ -22,6 +22,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "assets", "assets", "{258798
 		assets\logo@32.png = assets\logo@32.png
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TabTabGo.Templating.Tests", "test\TabTabGo.Templating.Tests\TabTabGo.Templating.Tests.csproj", "{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -114,6 +116,22 @@ Global
 		{41D7D855-E51D-43A4-8E4C-D1AC9DEF7CF1}.Release-qa|Any CPU.Build.0 = Release|Any CPU
 		{41D7D855-E51D-43A4-8E4C-D1AC9DEF7CF1}.Release-qa|x86.ActiveCfg = Release|Any CPU
 		{41D7D855-E51D-43A4-8E4C-D1AC9DEF7CF1}.Release-qa|x86.Build.0 = Release|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Debug|x86.Build.0 = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release|x86.ActiveCfg = Release|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release|x86.Build.0 = Release|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-prod|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-prod|Any CPU.Build.0 = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-prod|x86.ActiveCfg = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-prod|x86.Build.0 = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-qa|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-qa|Any CPU.Build.0 = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-qa|x86.ActiveCfg = Debug|Any CPU
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84}.Release-qa|x86.Build.0 = Debug|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -124,6 +142,7 @@ Global
 		{C1CB72EA-8EA8-4049-8208-3B7723782154} = {600FDA43-8147-4579-A5DE-C04B6CEF84ED}
 		{822A0A6A-96E3-493A-B27A-B5627F027CDF} = {14D4EA0E-975B-4172-9F00-BA8116C94FF6}
 		{41D7D855-E51D-43A4-8E4C-D1AC9DEF7CF1} = {14D4EA0E-975B-4172-9F00-BA8116C94FF6}
+		{FE087AEA-E5B9-4779-AC39-F0B5A8597A84} = {14D4EA0E-975B-4172-9F00-BA8116C94FF6}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5D821A3D-EE52-4CF1-BBB6-586CBA82F094}
