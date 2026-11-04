@@ -1,0 +1,25 @@
+<Project>
+
+  <!-- Shared version and package metadata (ADR 0001). TFM and per-project settings stay in each csproj on the v8 line. -->
+  <PropertyGroup>
+    <Version>8.0.3</Version>
+    <AssemblyVersion>8.0.0.0</AssemblyVersion>
+    <Authors>TabTabGo</Authors>
+    <Company>TabTabGo</Company>
+    <Copyright>Copyright (c) TabTabGo</Copyright>
+    <RepositoryUrl>https://github.com/TabTabGo/TabTabGo.Templating</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/TabTabGo/TabTabGo.Templating</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>logo@32.png</PackageIcon>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+</Project>
