@@ -14,9 +14,8 @@ string html = (string)engine.Render("Templates/invoice.liquid", new { Customer =
 string text = engine.RenderString("Hello {{ customer }}", new { Customer = "Acme" }, "en-US");
 ```
 
-Property names are exposed with the C# naming convention, so the property `Customer` is `{{ customer }}`... in
-templates written for this library the C# casing is used as written (`{{ data.Customer }}`), exactly as the existing
-templates in the consuming repositories do.
+Property names of plain objects keep their C# casing in templates (`{{ Customer }}`), and JSON keys keep the casing of
+the JSON (`{{ data.number }}`), as in the templates of the consuming repositories.
 
 Call `engine.Initialize()` once at start-up (`Render` does it for you). `RenderString` does **not** initialise the
 engine on the v8 line (B-4): if it is the first call in the process, custom filters are missing until `Initialize()`
@@ -52,7 +51,7 @@ Filters are called with the C# member name: `{{ value | FormatNumber: 'C' }}`.
 | Numbers | `DivideBy`, `Number`, `FormatNumber`, `FormatCurrency`, `FormatCurrencyWithCode`, `MarkNumbers`, `ToWords` |
 | Dates | `ToTimeZone`, `OffsetDate`, `FormatDate`, `ParseDate` |
 | JSON | `JSelectToken`, `JSelectTokenByProperty`, `JSelectTokenValues`, `JSelectTokenValuesByProperty`, `JSelectTokenValue`, `EscapeJsonString` |
-| Other | `CountryName`, and for the OpenXml HTML/XML export helpers `OpenXmlToString`, `OpenXmlType`, `OpenXmlFormat`, `OpenXmlMaxWidth` |
+| Other | `CountryName`, and the helpers `OpenXmlToString`, `OpenXmlType`, `OpenXmlFormat`, `OpenXmlMaxWidth` |
 
 Examples (each one is covered by a test in `test/TabTabGo.Templating.DotLiquid.Tests`):
 
@@ -77,7 +76,8 @@ once at start-up.
 
 ## Tags
 
-`{% increment name %}` increments the variable `name` (starting at 1 when absent in the current scope).
+`{% increment name %}` adds 1 to the integer variable `name` in the outermost scope. The variable must already exist
+(a missing variable fails on the v8 line, bug F-12).
 
 ## Limits and known issues on the v8 line
 
