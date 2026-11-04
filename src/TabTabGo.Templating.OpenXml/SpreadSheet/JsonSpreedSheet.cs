@@ -4,13 +4,26 @@ using DocumentFormat.OpenXml.Spreadsheet;
 using System;
 using System.IO;
 using System.Xml.Linq;
-using TabTabGo.IO.Utilities;
 using Newtonsoft.Json.Linq;
 
 namespace TabTabGo.Templating.OpenXml.SpreadSheet
 {
     public class JsonSpreedSheet
     {
+        private readonly TemplatingOptions _options;
+
+        /// <summary>Creates a writer with default <see cref="TemplatingOptions"/>.</summary>
+        public JsonSpreedSheet() : this(new TemplatingOptions())
+        {
+        }
+
+        /// <summary>Creates a writer that loads data-referenced stylesheets only from <see cref="TemplatingOptions.TemplatesPath"/>.</summary>
+        /// <param name="options">The options.</param>
+        public JsonSpreedSheet(TemplatingOptions options)
+        {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
+        }
+
         public void CreateExcelDoc(string fileName, JObject json)
         {
             using var file = new FileStream(fileName, FileMode.Create, FileAccess.ReadWrite);
@@ -35,7 +48,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var jToken = json.SelectToken("$.Workbook.Stylesheets");
             if (jToken?["TemplatePath"] != null)
             {
-                var xStyle = XDocument.Load(PathUtility.ResolvePath(jToken["TemplatePath"]?.ToString()!));
+                var xStyle = LoadStylesheet(jToken["TemplatePath"]?.ToString());
                 stylePart.Stylesheet = new Stylesheet(xStyle.ToString());
             }
             else
@@ -164,6 +177,47 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
 
             return cell;
+        }
+
+        /// <summary>
+        /// Loads a stylesheet whose path comes from the data (S-7). The path must be relative and stay inside
+        /// <see cref="TemplatingOptions.TemplatesPath"/> (the application base directory when it is not set); rooted, UNC and
+        /// traversing paths are rejected without echoing any absolute path, and the XML may not contain a DTD.
+        /// </summary>
+        private XDocument LoadStylesheet(string? requested)
+        {
+            if (string.IsNullOrWhiteSpace(requested)
+                || Path.IsPathRooted(requested)
+                || requested.StartsWith("\\\\", StringComparison.Ordinal)
+                || requested.StartsWith("//", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("The stylesheet path must be relative to the templates folder.", nameof(requested));
+            }
+
+            var root = Path.GetFullPath(string.IsNullOrEmpty(_options.TemplatesPath) ? AppContext.BaseDirectory : _options.TemplatesPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var full = Path.GetFullPath(Path.Combine(root, requested));
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!full.StartsWith(root, comparison))
+            {
+                throw new ArgumentException("The stylesheet path is outside the templates folder.", nameof(requested));
+            }
+
+            if (!File.Exists(full))
+            {
+                throw new FileNotFoundException("The stylesheet was not found in the templates folder.");
+            }
+
+            var settings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = _options.MaxXmlCharacters,
+            };
+            using (var reader = System.Xml.XmlReader.Create(full, settings))
+            {
+                return XDocument.Load(reader);
+            }
         }
 
         /// <summary>

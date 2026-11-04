@@ -101,7 +101,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             if (string.IsNullOrEmpty(templatePath) && jObject.SelectToken("$.Workbook") != null)
             {
                 // Generate standard SpreadSheet
-                var jSpressdSheet = new JsonSpreedSheet();
+                var jSpressdSheet = new JsonSpreedSheet(_options);
                 jSpressdSheet.CreateExcelDoc(output, jObject);
             }
             else if (!string.IsNullOrEmpty(templatePath))

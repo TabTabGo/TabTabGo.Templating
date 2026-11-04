@@ -39,6 +39,7 @@ jobs:
         with:
           ref: ${{ github.ref }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Release guards (tag format, tag major == TFM major, tag on its release branch, version == tag, not published)
         id: guards
@@ -131,6 +132,7 @@ jobs:
       - name: Summary
         env:
           VERSION: ${{ needs.build.outputs.version }}
+          TAGGED_BY: ${{ github.triggering_actor }}
         run: |
           {
             echo "### Published $VERSION"
@@ -139,5 +141,5 @@ jobs:
             echo "- [TabTabGo.Templating.Dotliquid](https://www.nuget.org/packages/TabTabGo.Templating.Dotliquid/$VERSION)"
             echo "- [TabTabGo.Templating.OpenXml](https://www.nuget.org/packages/TabTabGo.Templating.OpenXml/$VERSION)"
             echo ""
-            echo "Commit: \`$GITHUB_SHA\` - tagged by: \`${{ github.triggering_actor }}\`"
+            echo "Commit: \`$GITHUB_SHA\` - tagged by: \`$TAGGED_BY\`"
           } >> "$GITHUB_STEP_SUMMARY"

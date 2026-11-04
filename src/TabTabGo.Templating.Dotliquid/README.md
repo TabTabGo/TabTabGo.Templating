@@ -88,7 +88,10 @@ that ICU ignores (for example a soft hyphen).
 
 * `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is an empty string.
   Host configuration files are never read.
-* `GetMatch` stops after `TemplatingOptions.RegexTimeout` and returns an empty string.
+* `GetMatch`, the JSONPath filters (`JSelectToken*`, regex in `[?(@.n =~ /.../)]`) and DotLiquid's built-in `Replace`/`ReplaceFirst` stop after
+  `TemplatingOptions.RegexTimeout`: `GetMatch` returns an empty string, the JSONPath filters match nothing, and a time-out in the built-in filters makes the whole render return `Liquid error: regular expression time-out`.
+  The built-in filters read DotLiquid's process-wide `Template.RegexTimeOut`, which the engine lowers to the shortest `RegexTimeout` of any engine
+  initialised so far (the strictest engine wins; it is never raised).
 * `XPathSelect`/`XPathSelectMany` reject any XML that has a `<!DOCTYPE ...>` (even a plain `<!DOCTYPE html>`, which renders
   as `Liquid error`) and documents larger than `MaxXmlCharacters`. Strip the DOCTYPE before passing XML to the filter.
 

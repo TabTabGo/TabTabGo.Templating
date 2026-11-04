@@ -33,6 +33,10 @@ Cell expressions understand binary and `SUM` expressions (`CellExpression` famil
 
 ## Behaviour notes
 
+* A JSON workbook may name a stylesheet (`Workbook.Stylesheets.TemplatePath`). The path must be relative and stay inside
+  `TemplatingOptions.TemplatesPath` (the application base directory when unset); rooted, UNC and `..` paths fail with `ArgumentException`,
+  and the XML must not contain a DOCTYPE (S-7, 8.0.4).
+
 * Rendering happens in memory: no temporary file is created, even when a render fails (X-3, 8.0.4).
 * A boolean value is written as `1`/`0` in a boolean cell, so `true` shows as TRUE (X-2, 8.0.4).
 

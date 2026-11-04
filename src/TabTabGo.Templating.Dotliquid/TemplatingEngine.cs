@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Threading;
 using DotLiquid;
 using System;
@@ -26,6 +27,7 @@ namespace TabTabGo.Templating.Liquid
         public override string EngineName => "Liquid";
 
         private static readonly TimeSpan MaxRegexTimeout = TimeSpan.FromMilliseconds(int.MaxValue - 1);
+        private const string RegexTimeoutOutput = "Liquid error: regular expression time-out";
         private readonly TemplatingOptions _options;
 
         /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
@@ -60,6 +62,14 @@ namespace TabTabGo.Templating.Liquid
         {
             lock (_lock)
             {
+                // DotLiquid's built-in Replace/ReplaceFirst/RemoveFirst... treat their pattern as a regex with a 10 s time-out held in
+                // a process-wide static. Lower it to the shortest RegexTimeout of any engine initialised so far ("the strictest
+                // engine wins"); it is never raised again.
+                if (_options.RegexTimeout != Timeout.InfiniteTimeSpan && _options.RegexTimeout < Template.RegexTimeOut)
+                {
+                    Template.RegexTimeOut = _options.RegexTimeout;
+                }
+
                 if (!_isIinitialized)
                 {
                     Template.NamingConvention = new DotLiquid.NamingConventions.CSharpNamingConvention();
@@ -126,7 +136,14 @@ namespace TabTabGo.Templating.Liquid
 
             using (RenderScope.Begin(_options, fileSystem))
             {
-                return template.Render(RenderParameters.FromContext(context, cultureInfo));
+                try
+                {
+                    return template.Render(RenderParameters.FromContext(context, cultureInfo));
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    return RegexTimeoutOutput; // DotLiquid's built-in Replace/ReplaceFirst throw this out of Render
+                }
             }
         }
 
@@ -151,7 +168,14 @@ namespace TabTabGo.Templating.Liquid
 
             using (RenderScope.Begin(_options, fileSystem))
             {
-                return template.Render(parameters);
+                try
+                {
+                    return template.Render(parameters);
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    return RegexTimeoutOutput;
+                }
             }
         }
 
