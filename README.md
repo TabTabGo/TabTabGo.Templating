@@ -19,13 +19,13 @@ referenced together. None of the packages depends on `TabTabGo.Core` (ADR 0002):
 |---|---|---|---|
 | v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.4 is the security backport). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.N` | net10.0 | LTS line (this branch): every defect of spec section 6 fixed, sandboxing, options + DI, goldens, coverage gates |
-| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | pre-release (`-rc.N`) until .NET 11 GA (this branch); built and verified on CI only until a .NET 11 SDK is installed |
+| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | stable (`11.0.0`; `-rc.N` tags are consumer trials on the same release branch) (this branch); built and tested on SDK 11.0.100 |
 
 Design and decisions: `tabtabgo/docs/templating-modernization/` in the ttg-workspace (spec and ADRs 0001-0005).
 
 ## Building and testing
 
-The SDK is pinned by `global.json` (11.0.100-rc.3.26522.148, pre-release allowed; Microsoft.Extensions 11.0.0-rc.3.26522.148 exactly) and the tests run on Microsoft Testing Platform
+The SDK is pinned by `global.json` (11.0.100, `latestPatch`; Microsoft.Extensions 11.0.0) and the tests run on Microsoft Testing Platform
 (xunit.v3, coverlet.MTP, NSubstitute; ADR 0005). Packages are versioned centrally in `Directory.Packages.props` and restored with
 `packages.lock.json` files (`--locked-mode` on CI).
 
@@ -69,7 +69,7 @@ Packages are published **only from tags**. There is no publish from `master` or 
 
 If a publish run fails part-way, do not re-run it: re-runs are refused. Fix the cause, bump the patch version and tag again.
 
-Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=10.0.0 -o out`. Package validation has no baseline on this line; the API surface is compared with the previous line by ApiCompat in assembly mode
+Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=11.0.0 -o out`. Package validation has no baseline on this line; the API surface is compared with the previous line by ApiCompat in assembly mode
 (`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, tool pinned in `.config/dotnet-tools.json`, `dotnet tool restore`).
 
 ## Release notes 11.0.0

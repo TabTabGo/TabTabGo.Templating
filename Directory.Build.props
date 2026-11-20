@@ -1,6 +1,6 @@
 <Project>
 
-  <!-- v11 line (ADR 0001): pre-release (11.0.0-rc.N tags) until .NET 11 GA; v10 line settings otherwise: one TFM, language and nullability settings for every project; CI overrides Version with -p:Version=<tag without v>. -->
+  <!-- v11 line (ADR 0001): .NET 11 GA (11.0.0, or 11.0.0-rc.N tags as consumer trials); one TFM, language and nullability settings for every project; CI overrides Version with -p:Version=<tag without v>. -->
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
     <LangVersion>latest</LangVersion>
