@@ -1,7 +1,6 @@
 # TabTabGo.Templating
 
-> **v11 line, pre-release (`11.0.0-rc.N`).** Same code and API as 10.0.0 on net11.0 with the .NET 11 RC 3 pins. It is built and tested on CI only (there is no .NET 11 SDK on the
-> development machines yet); it stays a pre-release until .NET 11 GA (checklist: spec 12.3 C5).
+> **v11 line (`11.0.0`, `11.0.0-rc.N` for pre-releases).** Same code and API as 10.0.0 on net11.0, SDK 11.0.100 and Microsoft.Extensions 11.0.0 (GA).
 
 Template rendering for TabTabGo products: Liquid text/HTML (DotLiquid) and Excel workbooks (Open XML).
 
@@ -70,14 +69,15 @@ Packages are published **only from tags**. There is no publish from `master` or 
 
 If a publish run fails part-way, do not re-run it: re-runs are refused. Fix the cause, bump the patch version and tag again.
 
-Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=10.0.0 -o out`. Package validation compares with 6.0.5
-(`CompatibilitySuppressions.xml` lists the dropped target frameworks).
+Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=10.0.0 -o out`. Package validation has no baseline on this line; the API surface is compared with the previous line by ApiCompat in assembly mode
+(`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, needs `dotnet tool install --global Microsoft.DotNet.ApiCompat.Tool`).
 
-## Release notes 11.0.0-rc.1
+## Release notes 11.0.0
 
-No API or behaviour change compared with 10.0.0: the target framework is net11.0, `Microsoft.Extensions.*` are the .NET 11 RC 3 builds (exact pin), the SDK is
-`11.0.100-rc.3.26522.148`, and package validation compares with 10.0.0. DotLiquid, Humanizer, System.Linq.Dynamic.Core, Open XML SDK and Newtonsoft.Json have no net11 builds and resolve to
-their net10/net8 assets; the test suite proves the combination on CI. Not verified locally: any build or test on net11.0.
+No API or behaviour change compared with 10.0.0: the target framework is net11.0, `Microsoft.Extensions.*` are the 11.0.0 GA builds, the SDK is
+`11.0.100`, and ApiCompat compares the assemblies with 10.0.0. `Microsoft.Extensions.Options`, `DependencyInjection.Abstractions` and `Configuration.Abstractions` come from the
+net11.0 shared framework instead of packages. DotLiquid, Humanizer, System.Linq.Dynamic.Core, Open XML SDK and Newtonsoft.Json have no net11 builds and resolve to
+their net10/net8 assets; the test suite proves the combination (run on net11.0 with SDK 11.0.100).
 
 ## Release notes 10.0.0
 

@@ -38,9 +38,7 @@ jobs:
         run: python3 -m unittest discover .github/scripts
 
       - name: Restore
-        # packages.lock.json files are committed once a CI run on the .NET 11 SDK has produced them; until then a plain restore
-        run: |
-          if ls src/*/packages.lock.json >/dev/null 2>&1; then dotnet restore TabTabGo.Templating.sln --locked-mode; else dotnet restore TabTabGo.Templating.sln; fi
+        run: dotnet restore TabTabGo.Templating.sln --locked-mode
 
       - name: Build
         run: |
@@ -63,3 +61,10 @@ jobs:
           dotnet pack TabTabGo.Templating.sln -c Release --no-build -p:Version="$version" -o out
           tfm=$(grep -ho '<TargetFramework>[^<]*' Directory.Build.props | head -1 | sed 's/<TargetFramework>//')
           python3 .github/scripts/assert_packages.py out "$version" --tfm "$tfm"
+
+      - name: ApiCompat against the previous line (assembly mode)
+        # Package validation cannot compare net10.0 with net11.0 (PKV006), so the surface is compared here. TODO: drop --allow-missing-baseline
+        # as soon as TabTabGo.Templating 10.0.0 is on nuget.org; until then the step only warns.
+        run: |
+          dotnet tool install --global Microsoft.DotNet.ApiCompat.Tool
+          python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0 --allow-missing-baseline
