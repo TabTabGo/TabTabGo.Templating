@@ -1,3 +1,4 @@
+using TabTabGo.Templating.Liquid;
 using System.Text.RegularExpressions;
 using TabTabGo.Templating.TestKit;
 
@@ -79,6 +80,65 @@ public sealed class RegexTimeoutScopeTests
         var result = engine.RenderString(template, new { a = true, b = "y" });
 
         Assert.StartsWith("yx", result);
+    }
+
+    [Fact]
+    public void ParseTimeout_IsAppliedToDotLiquidsProcessWideRegexTimeout_NeverRaised()
+    {
+        // DotLiquid builds some of its parse expressions once, at first use, with the value current then; what an engine controls is the process-wide
+        // setting, so that is what is asserted (a catastrophic parse pattern cannot be forced deterministically in a warm process).
+        var original = global::DotLiquid.Template.RegexTimeOut;
+        try
+        {
+            global::DotLiquid.Template.RegexTimeOut = TimeSpan.FromSeconds(10);
+            new Liquid.TemplatingEngine(new TemplatingOptions { ParseTimeout = TimeSpan.FromSeconds(2) }).RenderString("{{ 'a' }}", new { });
+            Assert.Equal(TimeSpan.FromSeconds(2), global::DotLiquid.Template.RegexTimeOut);
+
+            new Liquid.TemplatingEngine(new TemplatingOptions { ParseTimeout = TimeSpan.FromSeconds(8) }).RenderString("{{ 'a' }}", new { });
+            Assert.Equal(TimeSpan.FromSeconds(2), global::DotLiquid.Template.RegexTimeOut); // the strictest engine wins
+        }
+        finally
+        {
+            global::DotLiquid.Template.RegexTimeOut = original;
+        }
+    }
+
+    [Fact]
+    public void DefaultParseTimeout_IsAFewSeconds_AndLowersDotLiquidsTenSecondDefault()
+    {
+        var original = global::DotLiquid.Template.RegexTimeOut;
+        try
+        {
+            global::DotLiquid.Template.RegexTimeOut = TimeSpan.FromSeconds(10);
+            var engine = new Liquid.TemplatingEngine(new TemplatingOptions());
+
+            engine.RenderString("{{ 'a' }}", new { });
+
+            Assert.Equal(TimeSpan.FromSeconds(5), new TemplatingOptions().ParseTimeout);
+            Assert.True(global::DotLiquid.Template.RegexTimeOut <= TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            global::DotLiquid.Template.RegexTimeOut = original;
+        }
+    }
+
+    [Fact]
+    public void RenderString_TemplateLongerThanMaxTemplateCharacters_IsRejectedBeforeParsing()
+    {
+        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { MaxTemplateCharacters = 100 });
+
+        Assert.Equal(new string('x', 100), engine.RenderString(new string('x', 100), new { }));
+        var error = Assert.Throws<RenderLimitExceededException>(() => engine.RenderString(new string('x', 101), new { }));
+        Assert.Contains("MaxTemplateCharacters", error.Message);
+    }
+
+    [Fact]
+    public void ParseTimeout_AndMaxTemplateCharacters_AreValidated()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Liquid.TemplatingEngine(new TemplatingOptions { ParseTimeout = TimeSpan.Zero }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Liquid.TemplatingEngine(new TemplatingOptions { ParseTimeout = Timeout.InfiniteTimeSpan }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Liquid.TemplatingEngine(new TemplatingOptions { MaxTemplateCharacters = -1 }));
     }
 
     [Fact]

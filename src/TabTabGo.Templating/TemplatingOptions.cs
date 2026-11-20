@@ -39,6 +39,16 @@ namespace TabTabGo.Templating
         /// <summary>Time-out of regular expressions evaluated by template filters. Default 200 ms.</summary>
         public TimeSpan RegexTimeout { get; set; } = TimeSpan.FromMilliseconds(200);
 
+        /// <summary>
+        /// Time-out of each regular expression DotLiquid runs while it parses a template (DotLiquid's own default is 10 s and is process-wide: the strictest value
+        /// of any engine wins and is never raised). Must be positive, never infinite. Default 5 seconds; separate from <see cref="RegexTimeout"/> so that a tight
+        /// filter time-out cannot fail the parse of a valid template.
+        /// </summary>
+        public TimeSpan ParseTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+        /// <summary>Longest template string, in characters, <c>RenderString</c> parses (template files are trusted and not limited). 0 disables the limit. Default 1 000 000.</summary>
+        public long MaxTemplateCharacters { get; set; } = 1_000_000;
+
         /// <summary>Maximum characters (after entity expansion) of an XML document parsed by template filters. Default 10 000 000.</summary>
         public long MaxXmlCharacters { get; set; } = 10_000_000;
 
