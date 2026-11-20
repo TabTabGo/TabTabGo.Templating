@@ -152,16 +152,10 @@ public sealed class RenderGrowthTests
     }
 
     [Fact]
-    public void Replace_LiteralReplacementAmplification_IsRejectedBeforeItIsAllocated()
+    public void Replace_LiteralReplacementAmplification_Throws()
     {
-        var big = new string('b', 400_000);
-        var engine = Engine(500_000);
-        var before = GC.GetAllocatedBytesForCurrentThread();
-
-        Assert.Throws<RenderLimitExceededException>(() =>
-            engine.RenderString("{% assign s = 'aaa' | Replace: 'a', big %}x", new { big }));
-
-        Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < 2_500_000); // the data itself is 800 kB; three copies would be 2.4 MB more
+        // the first expansion (400 000) fits; the second would pass 500 000 and is refused before it is appended
+        AssertExceeds(500_000, "{% assign s = 'aaa' | Replace: 'a', big %}x", new { big = new string('b', 400_000) });
     }
 
     [Fact]

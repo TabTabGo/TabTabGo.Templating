@@ -53,8 +53,15 @@ public static class GuardedStringFilters
 
         var builder = new StringBuilder();
         var first = true;
+        long count = 0;
         foreach (var item in Flatten(input))
         {
+            RenderBudget.CheckItems(++count);
+            if ((count & 1023) == 0)
+            {
+                RenderBudget.ThrowIfCancelled();
+            }
+
             if (!first)
             {
                 builder.Append(glue);
@@ -109,6 +116,7 @@ public static class GuardedStringFilters
             var times = Convert.ToDecimal(operand, System.Globalization.CultureInfo.InvariantCulture);
             if (times > 0)
             {
+                RenderBudget.CheckRepeat(times); // independent of the character product: an empty string repeated 3 billion times is a loop too
                 RenderBudget.Check((long)Math.Min((decimal)long.MaxValue, text.Length * times));
             }
         }
@@ -134,6 +142,10 @@ public static class GuardedStringFilters
         {
             result.Add(item);
             RenderBudget.Check(result.Count);
+            if ((result.Count & 1023) == 0)
+            {
+                RenderBudget.ThrowIfCancelled();
+            }
         }
 
         return result;
@@ -156,8 +168,9 @@ public static class GuardedStringFilters
             int at;
             while ((count < 0 || done < count) && (at = input.IndexOf(find, last, StringComparison.Ordinal)) >= 0)
             {
+                RenderBudget.ThrowIfCancelled();
+                RenderBudget.Check(builder.Length + (long)(at - last) + replacement.Length + (input.Length - at - find.Length));
                 builder.Append(input, last, at - last).Append(replacement);
-                RenderBudget.Check(builder.Length + (long)(input.Length - at - find.Length));
                 last = at + find.Length;
                 done++;
             }
@@ -168,8 +181,10 @@ public static class GuardedStringFilters
             var regex = new Regex(find, RegexOptions.None, Template.RegexTimeOut);
             for (var match = regex.Match(input); match.Success && (count < 0 || done < count); match = match.NextMatch())
             {
+                RenderBudget.ThrowIfCancelled();
+                // the size is estimated before Match.Result allocates: a replacement such as "$_$_$_" would otherwise be built first and checked after
+                RenderBudget.Check(builder.Length + (long)(match.Index - last) + RenderBudget.ExpansionBound(replacement, match.Length, input.Length) + (input.Length - match.Index - match.Length));
                 builder.Append(input, last, match.Index - last).Append(match.Result(replacement));
-                RenderBudget.Check(builder.Length + (long)(input.Length - match.Index - match.Length));
                 last = match.Index + match.Length;
                 done++;
             }

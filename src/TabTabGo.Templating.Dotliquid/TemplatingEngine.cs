@@ -173,7 +173,7 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
             // Filters format with the thread culture; it is the render culture for the duration of the render (B-6).
             CultureInfo.CurrentCulture = cultureInfo;
             CultureInfo.CurrentUICulture = cultureInfo;
-            using (RenderScope.Begin(_options, fileSystem))
+            using (RenderScope.Begin(_options, fileSystem, timeout.Token))
             {
                 // A regex or render time-out propagates as an exception: a failed render must not look like a successful result.
                 template.Render(writer, RenderParameters.FromContext(context, cultureInfo));
