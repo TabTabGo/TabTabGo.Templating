@@ -9,6 +9,7 @@ The test projects run on Microsoft Testing Platform (xunit.v3 + coverlet.MTP, AD
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args(argv)
 
+    shutil.rmtree(ROOT / "coverage", ignore_errors=True)  # coverlet.MTP refuses a results folder that already holds a report
     reports: list[str] = []
     for project in PROJECTS:
         results = ROOT / "coverage" / project
