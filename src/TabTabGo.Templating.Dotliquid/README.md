@@ -93,8 +93,10 @@ and `FilterByPrefix: 'name', 'Al'` (ordinal): no expression is parsed. `Filter`'
 
 * `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is empty. Host configuration files are never read.
 * `GetMatch` and the JSONPath filters (regex in `[?(@.n =~ /.../)]`) stop after `RegexTimeout` and degrade per expression (empty result).
-* DotLiquid's built-in `Replace`/`ReplaceFirst` time out at the strictest `RegexTimeout` of any engine (DotLiquid keeps that setting process-wide; it is lowered, never raised) and
-  throw `RegexMatchTimeoutException` out of the render.
+* `Replace`/`ReplaceFirst` (regex syntax levels) time out at the engine's `RegexTimeout` and throw `RegexMatchTimeoutException` out of the render. DotLiquid's process-wide
+  `Template.RegexTimeOut` is not touched: it also governs DotLiquid's own template-parse expressions, which a loaded host must not fail.
+* `MaxIterations` counts the items of **one** `for` loop, not the iterations of a render: nested loops multiply (400 x 400 passes the default). `RenderTimeout` (30 s) is the bound
+  for nested loops; size the template data, not the limit, to keep a render short.
 * `XPathSelect`/`XPathSelectMany` reject XML with a `<!DOCTYPE>` (rendered as `Liquid error`) and documents larger than `MaxXmlCharacters`.
 
 ### Custom filters

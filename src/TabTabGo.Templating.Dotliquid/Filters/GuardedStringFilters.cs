@@ -184,9 +184,9 @@ internal static class GuardedStringFilters
         }
         else
         {
-            // the stock 2.0 behaviour: the search text is a regular expression with the process-wide time-out; Replace expands $1 in the
+            // the stock 2.0 behaviour: the search text is a regular expression with the engine's regex time-out; Replace expands $1 in the
             // replacement, ReplaceFirst inserts it literally
-            var regex = new Regex(find, RegexOptions.None, Template.RegexTimeOut);
+            var regex = new Regex(find, RegexOptions.None, RenderScope.CurrentOptions.RegexTimeout);
             for (var match = regex.Match(input); match.Success && (count < 0 || done < count); match = match.NextMatch())
             {
                 RenderBudget.ThrowIfCancelled();

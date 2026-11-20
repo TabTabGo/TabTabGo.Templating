@@ -49,19 +49,15 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
     internal static long ParseCount => Interlocked.Read(ref _parseCount);
 
     /// <summary>
-    /// Registers the filters, the <c>increment</c> tag and the naming convention once per process, and lowers DotLiquid's
-    /// process-wide regex time-out to this engine's <see cref="TemplatingOptions.RegexTimeout"/> ("the strictest engine wins"; it is never raised).
+    /// Registers the filters, the <c>increment</c> tag and the naming convention once per process. DotLiquid's process-wide
+    /// <c>Template.RegexTimeOut</c> is left alone: it also governs DotLiquid's own template-parse expressions, which a loaded host must not fail; the
+    /// engine's <see cref="TemplatingOptions.RegexTimeout"/> bounds the expressions a template supplies (read per render through <see cref="RenderScope"/>).
     /// Every entry point calls it, so calling it yourself is optional.
     /// </summary>
     public void Initialize()
     {
         lock (InitLock)
         {
-            if (_options.RegexTimeout != Timeout.InfiniteTimeSpan && _options.RegexTimeout < Template.RegexTimeOut)
-            {
-                Template.RegexTimeOut = _options.RegexTimeout;
-            }
-
             if (_isInitialized)
             {
                 return;
@@ -190,8 +186,8 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
 
     private void EnsureInitialized()
     {
-        // Cheap on the hot path: the lock is only taken until this engine's regex time-out has been applied.
-        if (!_isInitialized || (_options.RegexTimeout != Timeout.InfiniteTimeSpan && _options.RegexTimeout < Template.RegexTimeOut))
+        // Cheap on the hot path: the lock is only taken until the process has been initialised.
+        if (!_isInitialized)
         {
             Initialize();
         }
