@@ -244,7 +244,7 @@
         "type": "Project",
         "dependencies": {
           "DocumentFormat.OpenXml": "[3.5.1, )",
-          "DotLiquid": "[2.3.260, )",
+          "DotLiquid": "[2.3.260, 2.4.0)",
           "Humanizer.Core": "[3.0.10, )",
           "Humanizer.Core.ar": "[3.0.10, )",
           "Newtonsoft.Json": "[13.0.4, )",
@@ -280,7 +280,7 @@
       },
       "DotLiquid": {
         "type": "CentralTransitive",
-        "requested": "[2.3.260, )",
+        "requested": "[2.3.260, 2.4.0)",
         "resolved": "2.3.260",
         "contentHash": "Fpiesi6qcFFeq6mgJZf5faZ5SyZEQcHNkQufcc8IrLhDJgZn0Hm+Vhxcd7zszs2s187VOQsuIXa7eW/2iIV6JQ=="
       },

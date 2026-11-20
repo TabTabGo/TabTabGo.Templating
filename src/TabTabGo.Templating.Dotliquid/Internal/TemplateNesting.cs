@@ -15,6 +15,12 @@ internal static class TemplateNesting
 {
     private const int ParseStackBytes = 256 * 1024 * 1024; // reserved, committed only as used; room for one million characters of nested tags
 
+    // tags that continue a block instead of opening one; answered without asking DotLiquid (it throws for a name it does not register, which is slow in a loop)
+    private static readonly HashSet<string> Continuations = new(StringComparer.Ordinal) { "else", "elsif", "elseif", "when", "break", "continue" };
+
+    // registered names are stable for the life of the process (a name may be registered later, never removed), so only positive answers are kept
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> KnownBlocks = new(StringComparer.Ordinal);
+
     private static readonly Regex TagName = new(@"^\{%\s*(\w+)", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // DotLiquid's own tokenizer is internal; calling it is what keeps the scan on the parser's token boundaries. The differential tests pin the pair.
@@ -75,8 +81,9 @@ internal static class TemplateNesting
     /// <param name="stopAfter">Depth at which to stop counting.</param>
     internal static int Depth(string template, int stopAfter = int.MaxValue)
     {
-        var tokens = Tokenize(DotLiquid.Tags.Comment.FromShortHand(template), Template.DefaultSyntaxCompatibilityLevel);
+        var tokens = Tokens(template);
         var open = new Stack<string>();
+        var notBlocks = new HashSet<string>(StringComparer.Ordinal); // per scan: an unregistered name is looked up once
         var deepest = 0;
         string? skipUntil = null; // raw and comment bodies: DotLiquid's tokenizer returns the body as one text token up to the end tag
         foreach (var token in tokens)
@@ -110,7 +117,7 @@ internal static class TemplateNesting
             if (name is "raw" or "comment")
             {
                 skipUntil = "end" + name;
-                if (IsBlock(name))
+                if (IsBlock(name, notBlocks))
                 {
                     open.Push(name); // a block level for the parser even though its body is one text token
                     deepest = Math.Max(deepest, open.Count);
@@ -123,7 +130,7 @@ internal static class TemplateNesting
             {
                 open.Pop();
             }
-            else if (IsBlock(name))
+            else if (IsBlock(name, notBlocks))
             {
                 open.Push(name);
                 deepest = Math.Max(deepest, open.Count);
@@ -137,8 +144,21 @@ internal static class TemplateNesting
         return deepest;
     }
 
-    private static bool IsBlock(string name)
+    /// <summary>The tokens <c>Template.Parse</c> would parse (its cost, superlinear in the token count, is DotLiquid's own).</summary>
+    internal static List<string> Tokens(string template) => Tokenize(DotLiquid.Tags.Comment.FromShortHand(template), Template.DefaultSyntaxCompatibilityLevel);
+
+    private static bool IsBlock(string name, HashSet<string> notBlocks)
     {
+        if (Continuations.Contains(name) || notBlocks.Contains(name))
+        {
+            return false;
+        }
+
+        if (KnownBlocks.ContainsKey(name))
+        {
+            return true;
+        }
+
         Type? type;
         try
         {
@@ -146,9 +166,17 @@ internal static class TemplateNesting
         }
         catch (NullReferenceException)
         {
-            return false; // DotLiquid 2.3 throws, instead of returning null, for a name that is not a registered tag (else, elsif, when ...)
+            notBlocks.Add(name);
+            return false; // DotLiquid 2.3 throws, instead of returning null, for a name that is not a registered tag
         }
 
-        return type != null && typeof(Block).IsAssignableFrom(type);
+        if (type != null && typeof(Block).IsAssignableFrom(type))
+        {
+            KnownBlocks[name] = true;
+            return true;
+        }
+
+        notBlocks.Add(name);
+        return false;
     }
 }

@@ -14,6 +14,7 @@ import sys
 import zipfile
 from pathlib import Path
 
+DOTLIQUID_BOUND = "[2.3.260, 2.4.0)"  # a bump goes through the architect and the nesting fuzz tests
 IDS = ("TabTabGo.Templating", "TabTabGo.Templating.Dotliquid", "TabTabGo.Templating.OpenXml")
 
 
@@ -62,6 +63,10 @@ def check(directory: Path, version: str, tfm: str | None) -> list[str]:
             if not groups or set(groups) != {tfm}:
                 errors.append(f"{package_id}: dependency groups {groups} are not exactly {tfm}")
         errors.extend(check_dependencies(package_id, text, tfm_major(tfm)))
+        if package_id == "TabTabGo.Templating.Dotliquid":
+            bound = re.search(r'<dependency id="DotLiquid" version="([^"]+)"', text)
+            if not bound or bound.group(1).replace(" ", "") != DOTLIQUID_BOUND.replace(" ", ""):
+                errors.append(f"{package_id}: DotLiquid dependency {bound.group(1) if bound else 'missing'} is not the bound {DOTLIQUID_BOUND} (risk R8: the nesting scan uses DotLiquid's internal tokenizer)")
         if package_id != "TabTabGo.Templating":
             dependency = re.search(r'<dependency id="TabTabGo\.Templating" version="([^"]+)"', text)
             minimum = dependency.group(1).lstrip("[").split(",")[0] if dependency else None

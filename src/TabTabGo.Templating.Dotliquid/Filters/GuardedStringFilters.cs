@@ -88,7 +88,7 @@ internal static class GuardedStringFilters
     /// <param name="input">The text.</param>
     /// <param name="string">What to remove.</param>
     public static string? RemoveFirst(Context context, string? input, string? @string) =>
-        ReplaceCore(context, input, @string, string.Empty, count: 1);
+        string.IsNullOrWhiteSpace(input) ? input : ReplaceCore(context, input, @string, string.Empty, count: 1); // stock returns a whitespace-only input untouched
 
     /// <summary>Adds numbers, or concatenates two strings.</summary>
     /// <param name="context">The render context.</param>

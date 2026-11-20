@@ -15,10 +15,10 @@ public sealed class GuardedFiltersStockParityTests
 {
     private static readonly string?[] Texts =
     {
-        null, "", "a", "a.b.a", "aXbXa", "ab", "a­b", "Straße", "straSSe", "ae æ", "$1", "x*y", "I i İ ı", "((", "[a-", "a|b",
+        null, "", "a", "a.b.a", "aXbXa", "ab", "a­b", "Straße", "straSSe", "ae æ", "$1", "x*y", "I i İ ı", "((", "[a-", "a|b", " ", "  ", "\t", "\u00A0", " a ", "a  b",
     };
 
-    private static readonly string?[] Finds = { null, "", "a", ".", "a.", "X", "ab", "æ", "ae", "SS", "ß", "(a)", "a|b", "(", "[a-", "\\." };
+    private static readonly string?[] Finds = { null, "", " ", "a", ".", "a.", "X", "ab", "æ", "ae", "SS", "ß", "(a)", "a|b", "(", "[a-", "\\." };
 
     private static readonly string?[] Replacements =
     {
