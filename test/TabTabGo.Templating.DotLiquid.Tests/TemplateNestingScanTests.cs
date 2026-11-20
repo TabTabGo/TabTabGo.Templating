@@ -139,6 +139,114 @@ public sealed class TemplateNestingScanTests
         Assert.True(TemplateNesting.RegistryLookups - before <= 2, $"{TemplateNesting.RegistryLookups - before} registry lookups"); // "if" (first time only) and the tag name
     }
 
+    private static readonly string[] ShorthandCorpus =
+    {
+        "{# {{ a }} {% if a %} #}",                                   // the whole template is one shorthand comment holding output and tag text
+        "{#{% if a %}{% if a %}{% if a %}#}",
+        "{# { } {{ #}",                                               // nested braces
+        "before {# {{ a }} #} after {% if a %}x{% endif %}",           // inside other text DotLiquid leaves {# and #} as text
+        "{{{ a }}}",                                                  // the literal shorthand
+        "{{{ {% if a %} }}}",
+        "{%- if a -%}  x  {%- endif -%}{{- a -}}",
+        "{% raw %}{# {{ a }} #}{% endraw %}",
+        "{% comment %}{{ a }}{% endcomment %}{{ a | Nofilter }}",       // a failing filter: the error text must be the same
+        "{{ a | Append: '{# #}' }}{# unterminated",
+        "{% if a %}{# x #}{% else %}{# y #}{% endif %}",
+        string.Empty,
+    };
+
+    [Theory]
+    [InlineData(SyntaxCompatibility.DotLiquid20)]
+    [InlineData(SyntaxCompatibility.DotLiquid21)]
+    [InlineData(SyntaxCompatibility.DotLiquid22)]
+    public void TheSharedTokenParse_PreprocessesLikeTemplateParse_ForEveryShorthand_AtEverySyntaxLevel(SyntaxCompatibility level)
+    {
+        var original = Template.DefaultSyntaxCompatibilityLevel;
+        var data = global::DotLiquid.Hash.FromAnonymousObject(new { a = true, x = new[] { 1, 2 } });
+        try
+        {
+            Template.DefaultSyntaxCompatibilityLevel = level;
+            foreach (var source in ShorthandCorpus)
+            {
+                Template stock;
+                try
+                {
+                    stock = Template.Parse(source);
+                }
+                catch (SyntaxException expected)
+                {
+                    var actual = Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(source, int.MaxValue));
+                    Assert.Equal(expected.Message, actual.Message);
+                    continue;
+                }
+
+                var shared = TemplateNesting.Parse(source, int.MaxValue);
+
+                Assert.Equal(ParsedDepth(stock.Root!), ParsedDepth(shared.Root!));
+                Assert.Equal(stock.Render(data), shared.Render(data));
+                Assert.Equal(stock.Errors.Count, shared.Errors.Count);
+                foreach (var mode in new[] { global::DotLiquid.ErrorsOutputMode.Display, global::DotLiquid.ErrorsOutputMode.Suppress })
+                {
+                    var parameters = () => new RenderParameters(System.Globalization.CultureInfo.InvariantCulture) { LocalVariables = data, ErrorsOutputMode = mode };
+                    Assert.Equal(stock.Render(parameters()), shared.Render(parameters()));
+                }
+
+                shared.MakeThreadSafe(); // as the engine does for cached files: it must work on a tree built the shared-token way
+                Assert.Equal(stock.Render(data), shared.Render(data));
+            }
+        }
+        finally
+        {
+            Template.DefaultSyntaxCompatibilityLevel = original;
+        }
+    }
+
+    [Fact]
+    public void TemplateParseInternal_DoesExactlyWhatTheSharedTokenParseReplicates()
+    {
+        // Fails closed when a DotLiquid release adds a step to ParseInternal that TemplateNesting.Parse does not replicate (the package is bound to [2.3.260, 2.4.0), risk R8)
+        var method = typeof(Template).GetMethod("ParseInternal", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)!;
+        var il = method.GetMethodBody()!.GetILAsByteArray()!;
+        var calls = new List<string>();
+        var fieldStores = 0;
+        for (var i = 0; i < il.Length - 4; i++)
+        {
+            if (il[i] is 0x28 or 0x6F or 0x73)
+            {
+                var called = method.Module.ResolveMethod(BitConverter.ToInt32(il, i + 1), null, null)!;
+                calls.Add(called.DeclaringType!.Name + "." + called.Name);
+                i += 4;
+            }
+            else if (il[i] is 0x7D)
+            {
+                fieldStores++;
+            }
+        }
+
+        Assert.Equal(new[] { "Document..ctor", "Template.set_Root", "Template.get_Root", "Tokenizer.Tokenize", "Tag.Initialize" }, calls);
+        Assert.Equal(0, fieldStores);
+    }
+
+    [Fact]
+    public void TheSharedTokenParse_SeesTheCallersCulture()
+    {
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            foreach (var name in new[] { "de-DE", "tr-TR", "ar-SA" })
+            {
+                System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(name);
+                const string source = "{{ 1.5 | Plus: 2.25 }}{{ 'I' | Downcase }}{% assign n = 3.5 %}{{ n | Times: 2 }}";
+
+                Assert.Equal(Template.Parse(source).Render(), TemplateNesting.Parse(source, int.MaxValue).Render());
+            }
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+    }
+
     [Fact]
     public void TheSharedTokenParse_BuildsTheSameTreeAsTemplateParse()
     {
@@ -246,7 +354,7 @@ public sealed class TemplateNestingScanTests
                 case 5: builder.Append("{% unless a %}").Append(Structured(random, depth + 1)).Append("{% endunless %}"); break;
                 case 6: builder.Append("{% capture c %}").Append(Structured(random, depth + 1)).Append("{% endcapture %}"); break;
                 case 7: builder.Append("{% comment %}").Append(Structured(random, depth + 1)).Append("{% endcomment %}"); break;
-                case 8: builder.Append("{% raw %}{% if a %}{% endraw %}"); break;
+                case 8: builder.Append(random.Next(2) == 0 ? "{% raw %}{% if a %}{% endraw %}" : "{# {{ a }} #}"); break;
                 case 9: builder.Append("{% case a %}{% when 1 %}").Append(Structured(random, depth + 1)).Append("{% endcase %}"); break;
                 default: builder.Append("{% if a %}").Append(Structured(random, depth + 1)).Append("{% endfoo %}{% endif %}"); break; // a decoy end tag
             }

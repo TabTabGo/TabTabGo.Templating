@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using DotLiquid;
@@ -35,7 +36,8 @@ internal static class TemplateNesting
     public static Template Parse(string template, int maxDepth)
     {
         // DotLiquid has no public overload for pre-tokenized input (its Template constructor is internal too), but Template.Parse is exactly: new Template(), Root = new Document(), Root.Initialize(null, null, tokens)
-        // over Tokenizer.Tokenize(source, level). Doing those steps here lets the scan and the parser share one token list (the tokenizer is superlinear, so a second
+        // over Tokenizer.Tokenize(source, level) (verified in 2.3.260's IL: ParseInternal does nothing else; Literal.FromShortHand and Comment.FromShortHand, the whitespace-control
+        // rewrite and the end-of-tag checks all run inside Tokenize, so one preprocessed string feeds both the scan and the parser). Doing those steps here lets the scan and the parser share one token list (the tokenizer is superlinear, so a second
         // pass doubled the parse cost). The tests compare the resulting tree with Template.Parse.
         var tokens = Tokens(template);
         if (Depth(tokens, maxDepth) > maxDepth)
@@ -45,11 +47,15 @@ internal static class TemplateNesting
 
         Template? parsed = null;
         Exception? failure = null;
+        var culture = CultureInfo.CurrentCulture; // a new thread starts with the process culture; the parse must see the caller's, as Template.Parse does
+        var uiCulture = CultureInfo.CurrentUICulture;
         var thread = new Thread(
             () =>
             {
                 try
                 {
+                    CultureInfo.CurrentCulture = culture;
+                    CultureInfo.CurrentUICulture = uiCulture;
                     var result = (Template)Activator.CreateInstance(typeof(Template), nonPublic: true)!; // the constructor is internal
                     result.Root = new Document();
                     result.Root.Initialize(null, null, tokens); // consumes the list
