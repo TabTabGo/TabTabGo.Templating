@@ -1,0 +1,1 @@
+{{ xml | XPathSelect: '/r/a' }}|{% assign m = xml | XPathSelectMany: '/r/b' %}{% for x in m %}{{ x }},{% endfor %}

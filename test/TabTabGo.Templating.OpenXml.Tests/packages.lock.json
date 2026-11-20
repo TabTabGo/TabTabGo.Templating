@@ -281,6 +281,15 @@
           "TabTabGo.Templating": "[10.0.0, )"
         }
       },
+      "tabtabgo.templating.testkit": {
+        "type": "Project",
+        "dependencies": {
+          "DocumentFormat.OpenXml": "[3.5.1, )",
+          "Newtonsoft.Json": "[13.0.4, )",
+          "TabTabGo.Templating.Dotliquid": "[10.0.0, )",
+          "TabTabGo.Templating.OpenXml": "[10.0.0, )"
+        }
+      },
       "DocumentFormat.OpenXml": {
         "type": "CentralTransitive",
         "requested": "[3.5.1, )",

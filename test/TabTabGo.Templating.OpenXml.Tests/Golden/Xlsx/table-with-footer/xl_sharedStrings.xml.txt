@@ -1,0 +1,1 @@
+<x:sst count="5" uniqueCount="5" xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:si><x:t>Name</x:t></x:si><x:si><x:t>Qty</x:t></x:si><x:si><x:t>{%$.items::name%}</x:t></x:si><x:si><x:t>{%$.items::qty%}</x:t></x:si><x:si><x:t>Total</x:t></x:si></x:sst>

@@ -1,0 +1,1 @@
+{% assign f = items | Filter: 'it["k"].ToString() = "a"' %}{% for x in f %}{{ x.k }},{% endfor %}|{% assign g = items | FilterBy: 'k', 'a' %}{% for x in g %}{{ x.k }},{% endfor %}|{% assign p = items | FilterByPrefix: 'k', 'a' %}{% for x in p %}{{ x.k }},{% endfor %}

@@ -23,6 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\TabTabGo.Templating.TestKit\TabTabGo.Templating.TestKit.csproj" />
     <ProjectReference Include="..\..\src\TabTabGo.Templating.OpenXml\TabTabGo.Templating.OpenXml.csproj" />
     <ProjectReference Include="..\..\src\TabTabGo.Templating.Dotliquid\TabTabGo.Templating.Dotliquid.csproj" />
   </ItemGroup>
@@ -31,6 +32,10 @@
     <None Update="SpreadSheet\Template\detailed-report.xlsx">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Golden\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

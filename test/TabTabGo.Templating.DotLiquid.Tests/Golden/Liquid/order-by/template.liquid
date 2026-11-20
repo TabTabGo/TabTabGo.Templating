@@ -1,0 +1,1 @@
+{% assign o = items | OrderBy: 'n' %}{% for x in o %}{{ x.n }},{% endfor %}
