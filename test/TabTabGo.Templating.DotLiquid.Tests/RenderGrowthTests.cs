@@ -225,4 +225,22 @@ public sealed class RenderGrowthTests
         Assert.Equal(string.Empty, Engine(100_000).RenderString(template, data)); // same template, roomy limit: renders (assign only prints nothing)
         Assert.Equal(string.Empty, Engine(0).RenderString(template, data));       // limit 0 = unlimited
     }
+
+    // ---- DotLiquid 2.2+ syntax mode: Replace is a literal replacement; the same budget applies
+
+    private static global::DotLiquid.Context Literal() =>
+        new(System.Globalization.CultureInfo.InvariantCulture) { SyntaxCompatibilityLevel = global::DotLiquid.SyntaxCompatibility.DotLiquid22 };
+
+    [Fact]
+    public void Replace_LiteralMode_IsLiteral_AndBounded()
+    {
+        using var scope = TabTabGo.Templating.Liquid.RenderScope.Begin(new TemplatingOptions { MaxOutputCharacters = 100 }, null);
+
+        Assert.Equal("a-b", TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.Replace(Literal(), "a.b", ".", "-"));
+        Assert.Equal("x-b.b", TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.Replace(Literal(), "a.b.b", "a.", "x-"));
+        Assert.Throws<RenderLimitExceededException>(() =>
+            TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.Replace(Literal(), new string('a', 60), "a", "bb"));
+        Assert.Throws<RenderLimitExceededException>(() =>
+            TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.ReplaceFirst(Literal(), "abc", "a", new string('z', 101)));
+    }
 }
