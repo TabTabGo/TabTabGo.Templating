@@ -10,7 +10,7 @@ namespace TabTabGo.Templating.Liquid.Tags;
 /// <see cref="RenderLimitExceededException"/> past <see cref="TemplatingOptions.MaxOutputCharacters"/>, so a capture cannot build an
 /// unbounded string before the output writer sees it. Behaviour within the limit is the stock tag's.
 /// </summary>
-public class GuardedCapture : Block
+internal class GuardedCapture : Block
 {
     private static readonly Regex Syntax = new(@"(\w+)", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 

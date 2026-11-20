@@ -29,17 +29,16 @@ def tfm_major(tfm: str | None) -> int | None:
 
 
 def check_dependencies(package_id: str, text: str, major: int | None) -> list[str]:
-    """Core-range guard: no -local build may be a dependency, TabTabGo.* dependencies other than the base package must be
-    bounded to the line ([M.0.0, M+1.0.0)), and Microsoft.Extensions.* must belong to the line's major."""
+    """Dependency guard: no -local build may be a dependency, no TabTabGo.* package other than the base package may be a dependency
+    (ADR 0002: this repo has no TabTabGo.Core dependency), and Microsoft.Extensions.* must belong to the line's major."""
     errors: list[str] = []
     for dep_id, dep_version in re.findall(r'<dependency id="([^"]+)" version="([^"]+)"', text):
         if "-local" in dep_version:
             errors.append(f"{package_id}: dependency {dep_id} {dep_version} is a local build and must never be published")
+        if dep_id.startswith("TabTabGo.") and dep_id != "TabTabGo.Templating":
+            errors.append(f"{package_id}: dependency {dep_id} is forbidden; the only TabTabGo.* dependency is TabTabGo.Templating (ADR 0002)")
         if major is None:
             continue
-        if dep_id.startswith("TabTabGo.") and dep_id not in IDS:
-            if not re.fullmatch(rf"\[{major}\.0\.0(-[^,]*)?, {major + 1}\.0\.0\)", dep_version):
-                errors.append(f"{package_id}: dependency {dep_id} {dep_version} is not the bounded range [{major}.0.0, {major + 1}.0.0)")
         if dep_id.startswith("Microsoft.Extensions."):
             lowest = dep_version.lstrip("[(").split(",")[0]
             if not lowest.startswith(f"{major}."):

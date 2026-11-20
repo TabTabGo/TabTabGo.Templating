@@ -43,7 +43,7 @@ namespace TabTabGo.Templating
         public long MaxXmlCharacters { get; set; } = 10_000_000;
 
         /// <summary>
-        /// Maximum iterations of the <c>for</c> tag per render (DotLiquid render limit). 0 disables the limit. Default 100 000.
+        /// Maximum items one <c>for</c> loop may iterate (DotLiquid's render limit: it counts per loop, not per render; nested loops each have their own count). 0 disables the limit. Default 100 000.
         /// </summary>
         public int MaxIterations { get; set; } = 100_000;
 
@@ -51,8 +51,9 @@ namespace TabTabGo.Templating
         public TimeSpan RenderTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
         /// <summary>
-        /// Characters of rendered output kept per render; anything beyond is dropped (the render still finishes within its other limits).
-        /// 0 disables the limit. Default 50 000 000.
+        /// Longest string, in characters, a render may produce: the output, a <c>capture</c> block, or the result of a growing filter. A render
+        /// that passes it throws <c>RenderLimitExceededException</c> (a <see cref="TimeoutException"/>); it never truncates. 0 disables the limit.
+        /// Default 50 000 000.
         /// </summary>
         public long MaxOutputCharacters { get; set; } = 50_000_000;
 

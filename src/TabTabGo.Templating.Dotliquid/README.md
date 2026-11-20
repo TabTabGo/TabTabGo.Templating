@@ -48,7 +48,9 @@ DotLiquid falls back to a file system the host assigned to `Template.FileSystem`
 `MaxIterations`, `RenderTimeout`, `MaxOutputCharacters` and `MaxDepth` (see the options table of `TabTabGo.Templating`) bound a render. A render, a `capture` block or the
 result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat` longer than `MaxOutputCharacters` throws `RenderLimitExceededException` (a
 `TimeoutException`, which DotLiquid lets escape instead of printing "Liquid error"); a timed-out render and regular-expression time-outs in `Replace` propagate the same way.
-Callers should handle them like any render failure.
+Callers should handle them like any render failure. Three exception types: `RenderLimitExceededException` (output limit; a `TimeoutException`, as are regular-expression
+time-outs), `DotLiquid.Exceptions.MaximumIterationsExceededException` (`MaxIterations`, counted per `for` loop; a `RenderException`, not a `TimeoutException`) and
+`OperationCanceledException` (`RenderTimeout`). Catching `TimeoutException` alone does not catch the last two.
 
 ## Filters
 

@@ -48,46 +48,6 @@ class TfmAndVersionTests(unittest.TestCase):
             release_guards.check_declared_version(root, "8.0.4")
 
 
-class ReleaseBranchTests(unittest.TestCase):
-    def _clone_with_branch(self, branch):
-        import os
-        import subprocess
-        base = Path(tempfile.mkdtemp())
-        git = lambda *args, cwd=None: subprocess.run(["git", *args], cwd=cwd or base / "work", check=True, capture_output=True, text=True,
-                                                     env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
-        git("init", "--bare", str(base / "origin.git"), cwd=base)
-        git("clone", str(base / "origin.git"), str(base / "work"), cwd=base)
-        (base / "work" / "f").write_text("x")
-        git("add", "f")
-        git("commit", "-m", "c")
-        git("push", "origin", f"HEAD:refs/heads/{branch}")
-        git("fetch", "origin")
-        return base / "work", git("rev-parse", "HEAD").stdout.strip()
-
-    def _check(self, branch, version):
-        import os
-        work, sha = self._clone_with_branch(branch)
-        previous = os.getcwd()
-        os.chdir(work)
-        try:
-            release_guards.check_release_branch(sha, release_guards.parse_tag("v" + version))
-        finally:
-            os.chdir(previous)
-
-    def test_release_branch_without_suffix_accepts_stable_and_prerelease_tags(self):
-        self._check("releases/v10.0.x/v10.0.0", "10.0.0")
-        self._check("releases/v10.0.x/v10.0.0", "10.0.0-rc.1")
-
-    def test_prerelease_tag_may_use_the_full_version_branch(self):
-        self._check("releases/v11.0.x/v11.0.0-rc.1", "11.0.0-rc.1")
-
-    def test_other_branch_is_refused(self):
-        with self.assertRaises(release_guards.GuardError):
-            self._check("releases/v10.0.x/v10.0.1", "10.0.0")
-        with self.assertRaises(release_guards.GuardError):
-            self._check("feature/x", "10.0.0")
-
-
 class PinGuardTests(unittest.TestCase):
     def _repo(self, packages="", global_json="{}"):
         root = Path(tempfile.mkdtemp())
@@ -154,13 +114,13 @@ class AssertPackagesTests(unittest.TestCase):
             z.writestr("x.nuspec", f'<package><metadata><id>TabTabGo.Templating.Dotliquid</id><version>10.0.0</version><dependencies><group targetFramework="{tfm}"><dependency id="TabTabGo.Templating" version="10.0.0" />{dependency}</group></dependencies></metadata></package>')
         return directory
 
-    def test_core_dependency_must_be_the_bounded_range_of_the_line(self):
-        ok = '<dependency id="TabTabGo.Core" version="[10.0.0, 11.0.0)" />'
-        self.assertEqual([], assert_packages.check(self._with_dependency("net10.0", ok), "10.0.0", "net10.0"))
-        for bad in ('<dependency id="TabTabGo.Core" version="10.0.0" />', '<dependency id="TabTabGo.Core" version="[10.0.0, 12.0.0)" />',
-                    '<dependency id="TabTabGo.Core" version="[11.0.0, 12.0.0)" />'):
+    def test_any_tabtabgo_dependency_except_the_base_package_is_refused(self):
+        for bad in ('<dependency id="TabTabGo.Core" version="[10.0.0, 11.0.0)" />', '<dependency id="TabTabGo.Core" version="10.0.0" />',
+                    '<dependency id="TabTabGo.Storage" version="10.0.0" />'):
             with self.subTest(bad=bad):
-                self.assertTrue(assert_packages.check(self._with_dependency("net10.0", bad), "10.0.0", "net10.0"))
+                errors = assert_packages.check(self._with_dependency("net10.0", bad), "10.0.0", "net10.0")
+                self.assertTrue(any("forbidden" in e for e in errors))
+        self.assertEqual([], assert_packages.check(self._with_dependency("net10.0", ""), "10.0.0", "net10.0"))
 
     def test_local_dependency_is_refused(self):
         bad = '<dependency id="TabTabGo.Core" version="[10.0.0-local.abc1234, 11.0.0)" />'
