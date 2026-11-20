@@ -41,5 +41,28 @@ namespace TabTabGo.Templating
 
         /// <summary>Maximum characters (after entity expansion) of an XML document parsed by template filters. Default 10 000 000.</summary>
         public long MaxXmlCharacters { get; set; } = 10_000_000;
+
+        /// <summary>
+        /// Maximum iterations of the <c>for</c> tag per render (DotLiquid render limit). 0 disables the limit. Default 100 000.
+        /// </summary>
+        public int MaxIterations { get; set; } = 100_000;
+
+        /// <summary>Wall-clock limit of one render. <see cref="System.Threading.Timeout.InfiniteTimeSpan"/> disables it. Default 30 seconds.</summary>
+        public TimeSpan RenderTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+        /// <summary>
+        /// Characters of rendered output kept per render; anything beyond is dropped (the render still finishes within its other limits).
+        /// 0 disables the limit. Default 50 000 000.
+        /// </summary>
+        public long MaxOutputCharacters { get; set; } = 50_000_000;
+
+        /// <summary>Maximum nesting depth when a data object is converted to template variables. Default 64.</summary>
+        public int MaxDepth { get; set; } = 64;
+
+        /// <summary>
+        /// When false (default) the <c>FullPath</c> filter returns a path relative to the template root and error messages never
+        /// contain server paths. Set to true where a host needs absolute paths (for example PDF generation from local HTML).
+        /// </summary>
+        public bool AllowAbsolutePaths { get; set; }
     }
 }

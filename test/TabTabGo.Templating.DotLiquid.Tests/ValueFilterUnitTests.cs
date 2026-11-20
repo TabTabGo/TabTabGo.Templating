@@ -82,9 +82,8 @@ namespace TabTabGo.Templating.DotLiquid.Tests
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
             // the template prepends "content" to the file name with no separator (Prepend semantics), see spec 11.4
-            var fullPath = Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/someFile.png")
-                + "," + Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/") + "contentsomeFile.png";
-            Assert.Equal(fullPath, renderedData);
+            // S-6: relative to the template root unless AllowAbsolutePaths is set
+            Assert.Equal("someFile.png,contentsomeFile.png", renderedData);
         }
 
         [Fact]
@@ -96,8 +95,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
-            var fullPath = Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/content/");
-            Assert.Equal(fullPath, renderedData);
+            Assert.Equal("content" + Path.DirectorySeparatorChar, renderedData);
         }
 
         [Fact]

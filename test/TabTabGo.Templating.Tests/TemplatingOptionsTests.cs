@@ -19,6 +19,11 @@ public class TemplatingOptionsTests
         Assert.Empty(options.AppSettings);
         Assert.Equal(TimeSpan.FromMilliseconds(200), options.RegexTimeout);
         Assert.Equal(10_000_000, options.MaxXmlCharacters);
+        Assert.Equal(100_000, options.MaxIterations);
+        Assert.Equal(TimeSpan.FromSeconds(30), options.RenderTimeout);
+        Assert.Equal(50_000_000, options.MaxOutputCharacters);
+        Assert.Equal(64, options.MaxDepth);
+        Assert.False(options.AllowAbsolutePaths);
         Assert.Equal("TabTabGo.Templating", TemplatingOptions.SectionName);
     }
 
@@ -38,6 +43,11 @@ public class TemplatingOptionsTests
             ["TabTabGo.Templating:CacheTemplates"] = "false",
             ["TabTabGo.Templating:RegexTimeout"] = "00:00:01",
             ["TabTabGo.Templating:MaxXmlCharacters"] = "1234",
+            ["TabTabGo.Templating:MaxIterations"] = "77",
+            ["TabTabGo.Templating:RenderTimeout"] = "00:00:05",
+            ["TabTabGo.Templating:MaxOutputCharacters"] = "999",
+            ["TabTabGo.Templating:MaxDepth"] = "9",
+            ["TabTabGo.Templating:AllowAbsolutePaths"] = "true",
             ["TabTabGo.Templating:AppSettings:Brand"] = "Acme",
         })
         .Build();
@@ -54,6 +64,11 @@ public class TemplatingOptionsTests
         Assert.False(options.CacheTemplates);
         Assert.Equal(TimeSpan.FromSeconds(1), options.RegexTimeout);
         Assert.Equal(1234, options.MaxXmlCharacters);
+        Assert.Equal(77, options.MaxIterations);
+        Assert.Equal(TimeSpan.FromSeconds(5), options.RenderTimeout);
+        Assert.Equal(999, options.MaxOutputCharacters);
+        Assert.Equal(9, options.MaxDepth);
+        Assert.True(options.AllowAbsolutePaths);
         Assert.Equal("Acme", options.AppSettings["brand"]);
     }
 
