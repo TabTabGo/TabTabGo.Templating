@@ -96,7 +96,7 @@ Fixed:
 - **Sandbox.** `FullPath` is relative, symbolic links cannot leave the include root, and renders are limited (S-6, S-10..S-12).
 
 Behaviour changes to check before upgrading (v10.0.0 compared with 8.0.4):
-1. **Output limit.** A render, a `capture` block or the result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat` longer than
+1. **Output limit.** A render, a `capture` block or the result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `RemoveFirst`, `Plus`, `Times`, `Concat` longer than
    `MaxOutputCharacters` (default 50 000 000) throws `RenderLimitExceededException` (it derives from `TimeoutException`). `MaxIterations` (100 000 items in one
    `for` loop; each loop counts separately) and `RenderTimeout` (30 s) apply to every render; 0 / `Timeout.InfiniteTimeSpan` disables them.
    The three limits surface as three exception types: `RenderLimitExceededException` (output limit; regular-expression time-outs are a `RegexMatchTimeoutException`, also a
@@ -114,7 +114,9 @@ Behaviour changes to check before upgrading (v10.0.0 compared with 8.0.4):
 7. `Distinct` removes duplicate hashes (compared by content) and keeps scalars; `Union` with an empty second list returns the first list; `GroupBy` puts missing keys in a group named "".
 8. `TabTabGo.IO.Utilities`, `Common.Logging.Core` and `Newtonsoft.Json` (base package) are no longer dependencies; Humanizer 3 (`Humanizer.Core` + `.ar`) replaces the
    Humanizer 2 metapackage (the English and Arabic number-to-words output is unchanged for the golden matrix).
-9. `Configuration.GetTemplatingConfiguration()` and `TemplatingConfigurationSection.SectionName` are `[Obsolete]`; the method now reads an optional `appsettings.json`.
+9. **Parse limits.** `RenderString` refuses a template longer than `MaxTemplateCharacters` (1 000 000) and any template (string or file) that nests blocks deeper than
+   `MaxNestingDepth` (100); DotLiquid's own parse expressions run under `ParseTimeout` (5 s). Filter regexes (`Replace`, `ReplaceFirst`, `RemoveFirst`) run under `RegexTimeout` (200 ms).
+10. `Configuration.GetTemplatingConfiguration()` and `TemplatingConfigurationSection.SectionName` are `[Obsolete]`; the method now reads an optional `appsettings.json`.
 
 Known limitations: tables placed side by side on the same rows are not supported; formulas below an expanded table are not re-pointed (a formula in the template row is);
 conditional formats, data validations and defined names below a table keep their old references (see the OpenXml README).

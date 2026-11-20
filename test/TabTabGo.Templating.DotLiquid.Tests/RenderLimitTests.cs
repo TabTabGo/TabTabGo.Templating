@@ -142,6 +142,19 @@ public sealed class RegexTimeoutScopeTests
     }
 
     [Fact]
+    public void RemoveFirst_RunsTheTemplatePatternUnderTheEngineRegexTimeout()
+    {
+        // M-3: stock RemoveFirst runs its argument as a regex under DotLiquid's process-wide time-out, which follows ParseTimeout (5 s)
+        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(100) });
+        var input = new string('a', 36) + "!";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        Assert.Throws<RegexMatchTimeoutException>(() => engine.RenderString("{{ input | RemoveFirst: '(a+)+$' }}", new { input }));
+
+        Assert.True(watch.ElapsedMilliseconds < 2500, $"took {watch.ElapsedMilliseconds} ms");
+    }
+
+    [Fact]
     public void FilterRegex_StillUsesTheEngineRegexTimeout()
     {
         var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(50) });

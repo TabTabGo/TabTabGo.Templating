@@ -45,8 +45,16 @@ DotLiquid falls back to a file system the host assigned to `Template.FileSystem`
 
 ## Limits
 
+Parsing happens before `RenderTimeout` starts (about 6 s per 1 000 000 characters of template; `MaxTemplateCharacters` caps a `RenderString` template at 1 000 000, files are trusted).
+`MaxNestingDepth` (100) refuses a template that nests blocks deeper, by a linear scan before parsing: DotLiquid's parser recurses once per level, and a few thousand nested
+`{% if %}` tags overflow the stack and end the process (this was also true of 8.0.x and stock DotLiquid). Block tags are found through the registered tag types, so custom blocks
+count; the content of `raw` and `comment` is skipped. A refused template throws `DotLiquid.Exceptions.SyntaxException`.
+
+**Hosts that render untrusted templates** should lower `RenderTimeout`, cap the number of concurrent renders and set `MaxTemplateCharacters` to what they need: one adversarial
+render can hold one CPU core for up to `RenderTimeout` and produce about 100 MB of output (twice `MaxOutputCharacters` in the worst case of output plus one growing string).
+
 `MaxIterations`, `RenderTimeout`, `MaxOutputCharacters` and `MaxDepth` (see the options table of `TabTabGo.Templating`) bound a render. A render, a `capture` block or the
-result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat` longer than `MaxOutputCharacters` throws `RenderLimitExceededException` (a
+result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `RemoveFirst`, `Plus`, `Times`, `Concat` longer than `MaxOutputCharacters` throws `RenderLimitExceededException` (a
 `TimeoutException`, which DotLiquid lets escape instead of printing "Liquid error"); a timed-out render and regular-expression time-outs in `Replace` propagate the same way.
 Callers should handle them like any render failure. Three exception types: `RenderLimitExceededException` (output limit; a `TimeoutException`, as are regular-expression
 time-outs), `DotLiquid.Exceptions.MaximumIterationsExceededException` (`MaxIterations`, counted per `for` loop; a `RenderException`, not a `TimeoutException`) and
@@ -93,7 +101,7 @@ and `FilterByPrefix: 'name', 'Al'` (ordinal): no expression is parsed. `Filter`'
 
 * `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is empty. Host configuration files are never read.
 * `GetMatch` and the JSONPath filters (regex in `[?(@.n =~ /.../)]`) stop after `RegexTimeout` and degrade per expression (empty result).
-* `Replace`/`ReplaceFirst` (regex syntax levels) time out at the engine's `RegexTimeout` and throw `RegexMatchTimeoutException` out of the render. DotLiquid's own template-parse
+* `Replace`/`ReplaceFirst`/`RemoveFirst` (regex syntax levels) time out at the engine's `RegexTimeout` and throw `RegexMatchTimeoutException` out of the render. DotLiquid's own template-parse
   expressions run under `ParseTimeout` (5 s) instead: it lowers DotLiquid's process-wide 10 s `Template.RegexTimeOut` (strictest engine wins), so a tight `RegexTimeout` cannot fail a valid parse
   and an untrusted template string cannot spend 10 s per expression; `RenderString` also refuses a template longer than `MaxTemplateCharacters`.
 * `MaxIterations` counts the items of **one** `for` loop, not the iterations of a render: nested loops multiply (400 x 400 passes the default). `RenderTimeout` (30 s) is the bound

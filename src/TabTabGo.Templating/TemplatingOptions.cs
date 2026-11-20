@@ -49,6 +49,12 @@ namespace TabTabGo.Templating
         /// <summary>Longest template string, in characters, <c>RenderString</c> parses (template files are trusted and not limited). 0 disables the limit. Default 1 000 000.</summary>
         public long MaxTemplateCharacters { get; set; } = 1_000_000;
 
+        /// <summary>
+        /// Deepest nesting of block tags (<c>if</c>, <c>for</c>, custom blocks ...) a template may have. DotLiquid's parser recurses once per level, so thousands of nested
+        /// blocks overflow the stack and end the process. Checked by a linear scan before parsing. Must be at least 1. Default 100.
+        /// </summary>
+        public int MaxNestingDepth { get; set; } = 100;
+
         /// <summary>Maximum characters (after entity expansion) of an XML document parsed by template filters. Default 10 000 000.</summary>
         public long MaxXmlCharacters { get; set; } = 10_000_000;
 
