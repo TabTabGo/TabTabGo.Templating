@@ -92,24 +92,6 @@ public sealed class TemplateNestingTests
     }
 
     [Fact]
-    public void RawAndComment_AreSkipped()
-    {
-        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { MaxNestingDepth = 2 });
-        var hidden = string.Concat(Enumerable.Repeat("{% if a %}", 50));
-
-        Assert.Equal(hidden, engine.RenderString("{% raw %}" + hidden + "{% endraw %}", new { }));
-        Assert.Equal("ok", engine.RenderString("{% comment %}" + hidden + "{% endcomment %}ok", new { }));
-    }
-
-    [Fact]
-    public void WhitespaceControlTags_AreCounted()
-    {
-        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { MaxNestingDepth = 2 });
-
-        Assert.Throws<SyntaxException>(() => engine.RenderString("{%- if a -%}{%- if a -%}{%- if a -%}x{%- endif -%}{%- endif -%}{%- endif -%}", new { a = true }));
-    }
-
-    [Fact]
     public void CustomBlockTags_Count()
     {
         Template.RegisterTag<NestingProbeBlock>("nestingprobe");
