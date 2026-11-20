@@ -1,5 +1,6 @@
 """Self tests for the release scripts. Run: python3 -m unittest discover .github/scripts"""
 import json
+import re
 import tempfile
 import unittest
 import zipfile
@@ -135,6 +136,28 @@ class AssertPackagesTests(unittest.TestCase):
         directory = self._dir()
         (directory / "extra.nupkg").write_bytes(b"x")
         self.assertTrue(assert_packages.check(directory, "8.0.3", "net8.0"))
+
+
+class WorkflowHygieneTests(unittest.TestCase):
+    """Supply chain: a tool the release job runs must come from the pinned manifest, and a publish run may not skip a missing baseline."""
+
+    WORKFLOWS = Path(__file__).resolve().parents[1] / "workflows"
+
+    def test_no_unpinned_dotnet_tool_install(self):
+        for workflow in sorted(self.WORKFLOWS.glob("*.yml")):
+            for number, line in enumerate(workflow.read_text(encoding="utf-8").splitlines(), 1):
+                if "dotnet tool install" in line and not re.search(r"--version\s+\d+\.\d+\.\d+\S*", line):
+                    self.fail(f"{workflow.name}:{number} installs a dotnet tool without an exact --version; use .config/dotnet-tools.json and 'dotnet tool restore'")
+
+    def test_manifest_versions_are_exact(self):
+        manifest = Path(__file__).resolve().parents[2] / ".config" / "dotnet-tools.json"
+        if manifest.exists():
+            for name, tool in json.loads(manifest.read_text(encoding="utf-8"))["tools"].items():
+                self.assertRegex(tool["version"], r"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$", name)
+
+    def test_publish_does_not_allow_a_missing_baseline(self):
+        publish = self.WORKFLOWS / "publish.yml"
+        self.assertNotIn("--allow-missing-baseline", publish.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
