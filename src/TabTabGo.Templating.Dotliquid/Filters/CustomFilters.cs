@@ -22,5 +22,10 @@ namespace TabTabGo.Templating.Liquid.Filters
             string countryName = region.EnglishName;
             return countryName;
         }
+
+        public static string CountryName(string countryCode, string culture)
+        {
+            return countryCode;
+        }
     }
 }

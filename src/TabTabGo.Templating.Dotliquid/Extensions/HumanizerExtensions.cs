@@ -31,7 +31,7 @@ public static class HumanizerExtensions
         return $"{(shouldCapitalize ? integer.Capitalize() : integer)}{symbol}{fractionWords}";
     }
 
-    private static string Capitalize(this string input)
+    internal static string Capitalize(this string input)
     {
         var words = input.Split(' ');
         var result = new StringBuilder();
