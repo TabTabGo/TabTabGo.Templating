@@ -142,6 +142,8 @@ public sealed class GuardedFiltersStockParityTests
                                     "Replace " + where);
                                 Assert.True(Equals(Run(() => Stock.ReplaceFirst(context, input!, find!, replacement!)), Run(() => Guarded.ReplaceFirst(context, input, find, replacement))),
                                     "ReplaceFirst " + where);
+                                Assert.True(Equals(Run(() => Stock.RemoveFirst(context, input!, find!)), Run(() => Guarded.RemoveFirst(context, input, find))),
+                                    "RemoveFirst " + where);
                             }
                         }
                     }

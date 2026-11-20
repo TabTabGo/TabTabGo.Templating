@@ -7,7 +7,7 @@ using TabTabGo.Templating.Liquid.Internal;
 namespace TabTabGo.Templating.Liquid.Filters;
 
 /// <summary>
-/// DotLiquid's growing filters (<c>Append</c>, <c>Prepend</c>, <c>Join</c>, <c>Replace</c>, <c>ReplaceFirst</c>, <c>Plus</c>, <c>Times</c>,
+/// DotLiquid's growing filters (<c>Append</c>, <c>Prepend</c>, <c>Join</c>, <c>Replace</c>, <c>ReplaceFirst</c>, <c>RemoveFirst</c>, <c>Plus</c>, <c>Times</c>,
 /// <c>Concat</c>) with a size check against <see cref="TemplatingOptions.MaxOutputCharacters"/> before anything is allocated. Registered after
 /// the stock filters so these win; within the limit they return exactly what the stock DotLiquid filters return at every syntax level
 /// (the differential test <c>GuardedFiltersStockParityTests</c> pins it).
@@ -82,6 +82,13 @@ internal static class GuardedStringFilters
     /// <param name="replacement">What to put in its place.</param>
     public static string? ReplaceFirst(Context context, string? input, string? @string, string? replacement = "") =>
         ReplaceCore(context, input, @string, replacement, count: 1);
+
+    /// <summary>Removes the first match only (stock: <c>ReplaceFirst</c> with an empty replacement), under the engine's regex time-out.</summary>
+    /// <param name="context">The render context.</param>
+    /// <param name="input">The text.</param>
+    /// <param name="string">What to remove.</param>
+    public static string? RemoveFirst(Context context, string? input, string? @string) =>
+        ReplaceCore(context, input, @string, string.Empty, count: 1);
 
     /// <summary>Adds numbers, or concatenates two strings.</summary>
     /// <param name="context">The render context.</param>

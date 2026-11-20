@@ -129,6 +129,7 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
             throw new RenderLimitExceededException($"The template string has more than {_options.MaxTemplateCharacters} characters (TemplatingOptions.MaxTemplateCharacters).");
         }
 
+        TemplateNesting.Check(templateString, _options.MaxNestingDepth);
         var template = Template.Parse(templateString); // parsed per call, so nothing is shared between renders
         var variables = new ObjectHasher(_options.MaxDepth).HashRoot(sourceData);
 
@@ -239,10 +240,12 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
         }
     }
 
-    private static Template ParseFile(string fullPath)
+    private Template ParseFile(string fullPath)
     {
         Interlocked.Increment(ref _parseCount);
-        var template = Template.Parse(File.ReadAllText(fullPath));
+        var text = File.ReadAllText(fullPath);
+        TemplateNesting.Check(text, _options.MaxNestingDepth);
+        var template = Template.Parse(text);
         // Defence in depth, no test can observe it: render isolation comes from the per-render Context (tested in RenderIsolationTests). Without this
         // call the cached template would keep a reference to the last render's registers and assigns.
         template.MakeThreadSafe();

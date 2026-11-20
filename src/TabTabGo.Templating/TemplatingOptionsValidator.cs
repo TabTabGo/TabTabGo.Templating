@@ -32,6 +32,11 @@ internal static class TemplatingOptionsValidator
             throw new ArgumentOutOfRangeException(nameof(options), "ParseTimeout must be positive and finite.");
         }
 
+        if (options.MaxNestingDepth < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxNestingDepth must be at least 1.");
+        }
+
         if (options.MaxTemplateCharacters < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(options), "MaxTemplateCharacters must not be negative (0 = unlimited).");

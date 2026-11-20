@@ -28,6 +28,7 @@ Engines: [`TabTabGo.Templating.Dotliquid`](../TabTabGo.Templating.Dotliquid/READ
 | `StylesheetRoot` | `null` | OpenXml JSON-workbook stylesheets are loaded only from here (relative: against the application base directory; default: the base directory) |
 | `RegexTimeout` | 200 ms | time-out of regular expressions run by template filters (`GetMatch`, JSONPath, `Replace`); keep it at 50 ms or more |
 | `ParseTimeout` | 5 s | time-out of each regular expression DotLiquid runs while parsing a template (process-wide, strictest engine wins, never infinite) |
+| `MaxNestingDepth` | 100 | deepest nesting of block tags (`if`, `for`, custom blocks); deeper templates are refused before parsing (stack overflow protection); at least 1 |
 | `MaxTemplateCharacters` | 1 000 000 | longest template string `RenderString` parses (files are trusted); 0 = unlimited |
 | `MaxXmlCharacters` | 10 000 000 | size cap of XML parsed by `XPathSelect`/`XPathSelectMany` and stylesheets (DTDs are always rejected); 0 = unlimited |
 | `MaxIterations` | 100 000 | items one `for` loop may iterate (counted per loop, not per render); 0 = unlimited |
