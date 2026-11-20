@@ -103,14 +103,15 @@ Behaviour changes to check before upgrading (v10.0.0 compared with 8.0.4):
    `TimeoutException`), `DotLiquid.Exceptions.MaximumIterationsExceededException` (a DotLiquid `RenderException`, not a `TimeoutException`) and
    `OperationCanceledException` (the render time-out). A host that catches `TimeoutException` does not catch the last two.
 2. **`FullPath` returns a path relative to the template folder** unless `AllowAbsolutePaths` is true (hosts that give the path to a PDF renderer opt in).
-3. **Culture.** Filters format with the render culture (the `culture` argument); numbers and dates in data are parsed invariantly. `Number`/`DivideBy` of
+3. **Culture.** Filters format with the render culture (the `culture` argument), not the thread's ambient culture; numbers and dates in data are parsed invariantly. `Number`/`DivideBy` of
    text such as `1,5` fall back to the render culture; division by zero is 0.
-4. **Dates.** A date-time of unspecified kind is UTC; `Today` is the UTC date; `FormatDate('Now')` is UTC; `ToTimeZone` resolves ids, not display names.
-5. **OpenXml typing.** IDs with leading zeros and phone numbers stay text; numbers use a `.` regardless of the server culture; dates are serial numbers
+4. **Dates.** A date-time of unspecified kind is UTC; `Today` is the UTC date; `FormatDate('Now')` is UTC; `ToTimeZone` resolves ids, not display names, and its result is a
+   date-time with offset, so printing it without `FormatDate` ends with the offset suffix (`1/15/2026 2:30:00 PM +04:00`).
+5. **OpenXml typing.** Cells are typed: JSON strings such as `"0502888414"` (IDs with leading zeros, phone numbers) stay text; numbers use a `.` regardless of the server culture; dates are serial numbers
    (format the cell in the template) unless the macro has an explicit `:#format`; text is written inline unless `:#SS`.
 6. **OpenXml tables.** Rows below a table keep their gaps (they used to be packed together); a blank row remains for an empty array; the template row may contain
    static text (kept as text); the first sheet part is no longer shared by several `Sheets` entries (one part per entry).
-7. `Distinct` keeps scalars and compares hashes by content; `Union` with an empty second list returns the first list; `GroupBy` puts missing keys in a group named "".
+7. `Distinct` removes duplicate hashes (compared by content) and keeps scalars; `Union` with an empty second list returns the first list; `GroupBy` puts missing keys in a group named "".
 8. `TabTabGo.IO.Utilities`, `Common.Logging.Core` and `Newtonsoft.Json` (base package) are no longer dependencies; Humanizer 3 (`Humanizer.Core` + `.ar`) replaces the
    Humanizer 2 metapackage (the English and Arabic number-to-words output is unchanged for the golden matrix).
 9. `Configuration.GetTemplatingConfiguration()` and `TemplatingConfigurationSection.SectionName` are `[Obsolete]`; the method now reads an optional `appsettings.json`.

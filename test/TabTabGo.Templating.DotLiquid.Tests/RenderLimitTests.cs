@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using TabTabGo.Templating.TestKit;
 
 namespace TabTabGo.Templating.DotLiquid.Tests;
@@ -63,5 +64,29 @@ public sealed class RenderLimitTests
         var result = (string)new Liquid.TemplatingEngine().Render(path, new { rows });
 
         Assert.EndsWith("19999:row;", result);
+    }
+}
+
+/// <summary>QA F2: the regex time-out bounds user-controlled regular expressions, never DotLiquid's own template-parse expressions.</summary>
+public sealed class RegexTimeoutScopeTests
+{
+    [Fact]
+    public void Parse_OfALargeTemplate_IsNotBoundByATinyRegexTimeout()
+    {
+        var template = string.Concat(Enumerable.Repeat("{% if a %}{{ b | Append: 'x' }}{% else %}{% assign c = 'q' %}{% endif %}\n", 4000));
+        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromTicks(1), MaxOutputCharacters = 0 });
+
+        var result = engine.RenderString(template, new { a = true, b = "y" });
+
+        Assert.StartsWith("yx", result);
+    }
+
+    [Fact]
+    public void FilterRegex_StillUsesTheEngineRegexTimeout()
+    {
+        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromMilliseconds(50) });
+        var input = new string('a', 60) + "!";
+
+        Assert.Throws<RegexMatchTimeoutException>(() => engine.RenderString("{{ input | Replace: '(a+)+$', 'x' }}", new { input }));
     }
 }
