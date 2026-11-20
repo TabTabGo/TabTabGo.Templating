@@ -87,6 +87,18 @@ public sealed class StylesheetPathTests : IDisposable
     }
 
     [Fact]
+    public void Stylesheet_LargerThanMaxXmlCharacters_Throws()
+    {
+        // S-7: the stylesheet is read with the size cap; the same file loads when the cap allows it
+        var tooSmall = new Engine(new TemplatingOptions { StylesheetRoot = _root, MaxXmlCharacters = 50 });
+        Assert.ThrowsAny<System.Xml.XmlException>(() => tooSmall.Render("", Workbook("styles.xml")));
+
+        var roomy = new Engine(new TemplatingOptions { StylesheetRoot = _root, MaxXmlCharacters = 100_000 });
+        using var result = Assert.IsType<MemoryStream>(roomy.Render("", Workbook("styles.xml")));
+        Assert.True(result.Length > 0);
+    }
+
+    [Fact]
     public void Stylesheet_AbsolutePath_Throws()
     {
         var absolute = Path.Combine(_base, "outside.xml");
