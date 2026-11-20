@@ -63,7 +63,9 @@ public class ConfigurationTests
     [Fact]
     public void SectionNameField_IsObsolete_AndStillTheSameValue()
     {
+#pragma warning disable CS0618
         var field = typeof(TemplatingConfigurationSection).GetField(nameof(TemplatingConfigurationSection.SectionName))!;
+#pragma warning restore CS0618
 
         Assert.Single(field.GetCustomAttributes(typeof(ObsoleteAttribute), false));
 #pragma warning disable CS0618

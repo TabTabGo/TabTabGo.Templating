@@ -33,8 +33,9 @@ internal sealed class RenderSession
 
     public void Run()
     {
+        var workbook = _workbook.Workbook ?? throw new InvalidOperationException("The template has no workbook.");
         var macros = ReadMacros();
-        var sheets = _workbook.Workbook.GetFirstChild<Sheets>()?.Elements<Sheet>() ?? Enumerable.Empty<Sheet>();
+        var sheets = workbook.GetFirstChild<Sheets>()?.Elements<Sheet>() ?? Enumerable.Empty<Sheet>();
         foreach (var sheet in sheets)
         {
             if (sheet.Id?.Value is not string relationshipId || _workbook.GetPartById(relationshipId) is not WorksheetPart worksheetPart)
@@ -45,7 +46,7 @@ internal sealed class RenderSession
             ProcessSheet(worksheetPart, macros);
         }
 
-        var calculation = _workbook.Workbook.CalculationProperties ??= new CalculationProperties();
+        var calculation = workbook.CalculationProperties ??= new CalculationProperties();
         calculation.ForceFullCalculation = true;
         calculation.FullCalculationOnLoad = true;
 
@@ -79,8 +80,8 @@ internal sealed class RenderSession
     private void ProcessSheet(WorksheetPart part, Dictionary<int, string> macros)
     {
         var worksheet = part.Worksheet;
-        var sheetData = worksheet.GetFirstChild<SheetData>();
-        if (sheetData == null)
+        var sheetData = worksheet?.GetFirstChild<SheetData>();
+        if (worksheet == null || sheetData == null)
         {
             return;
         }
@@ -94,7 +95,7 @@ internal sealed class RenderSession
             }
         }
 
-        var tables = part.TableDefinitionParts.Select(p => p.Table).Where(t => t.Reference?.Value != null).OrderBy(t => StartRow(t)).ToList();
+        var tables = part.TableDefinitionParts.Select(p => p.Table).OfType<Table>().Where(t => t.Reference?.Value != null).OrderBy(t => StartRow(t)).ToList();
         var nextSharedIndex = NextSharedIndex(sheetData);
         foreach (var table in tables)
         {

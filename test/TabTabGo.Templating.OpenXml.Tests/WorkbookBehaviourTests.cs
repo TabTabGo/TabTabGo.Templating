@@ -29,7 +29,7 @@ public sealed class WorkbookBehaviourTests : IDisposable
         using var stream = new MemoryStream(workbook);
         using var document = SpreadsheetDocument.Open(stream, false);
         var part = document.WorkbookPart!.WorksheetParts.ElementAt(sheet);
-        return part.Worksheet.Descendants<Cell>().ToDictionary(c => c.CellReference!.Value!, c => (Cell)c.CloneNode(true));
+        return part.Worksheet!.Descendants<Cell>().ToDictionary(c => c.CellReference!.Value!, c => (Cell)c.CloneNode(true));
     }
 
     private static string Text(byte[] workbook, string cell, int sheet = 0)
@@ -37,10 +37,10 @@ public sealed class WorkbookBehaviourTests : IDisposable
         using var stream = new MemoryStream(workbook);
         using var document = SpreadsheetDocument.Open(stream, false);
         var part = document.WorkbookPart!.WorksheetParts.ElementAt(sheet);
-        var found = part.Worksheet.Descendants<Cell>().Single(c => c.CellReference!.Value == cell);
+        var found = part.Worksheet!.Descendants<Cell>().Single(c => c.CellReference!.Value == cell);
         if (found.DataType?.Value == CellValues.SharedString)
         {
-            return document.WorkbookPart.SharedStringTablePart!.SharedStringTable.Elements<SharedStringItem>().ElementAt(int.Parse(found.CellValue!.Text, CultureInfo.InvariantCulture)).InnerText;
+            return document.WorkbookPart!.SharedStringTablePart!.SharedStringTable!.Elements<SharedStringItem>().ElementAt(int.Parse(found.CellValue!.Text, CultureInfo.InvariantCulture)).InnerText;
         }
 
         return found.InlineString?.Text?.Text ?? found.CellValue?.Text ?? string.Empty;
@@ -50,11 +50,11 @@ public sealed class WorkbookBehaviourTests : IDisposable
     {
         using var stream = new MemoryStream(workbook);
         using var document = SpreadsheetDocument.Open(stream, false);
-        return read(document.WorkbookPart!.WorksheetParts.ElementAt(sheet).Worksheet, document.WorkbookPart);
+        return read(document.WorkbookPart!.WorksheetParts.ElementAt(sheet).Worksheet!, document.WorkbookPart);
     }
 
     private static string TableRef(byte[] workbook, int table = 0) =>
-        WithWorksheet(workbook, (ws, wb) => wb.WorksheetParts.First().TableDefinitionParts.ElementAt(table).Table.Reference!.Value!);
+        WithWorksheet(workbook, (ws, wb) => wb.WorksheetParts.First().TableDefinitionParts.ElementAt(table).Table!.Reference!.Value!);
 
     // ---- X-5 typing
 
@@ -157,7 +157,7 @@ public sealed class WorkbookBehaviourTests : IDisposable
     {
         var bytes = Render(TemplateBuilder.Create().Sheet("S").Text("A1", "{%$.a%}").WithoutCalculationProperties(), new { a = 1 });
 
-        var calc = WithWorksheet(bytes, (_, wb) => wb.Workbook.CalculationProperties);
+        var calc = WithWorksheet(bytes, (_, wb) => wb.Workbook!.CalculationProperties);
         Assert.NotNull(calc);
         Assert.True(calc.FullCalculationOnLoad?.Value);
     }
@@ -189,7 +189,7 @@ public sealed class WorkbookBehaviourTests : IDisposable
         var bytes = Render(template, new { items = Array.Empty<object>() });
 
         Assert.Equal("A3:B4", TableRef(bytes));
-        Assert.Equal("A3:B4", WithWorksheet(bytes, (ws, wb) => wb.WorksheetParts.First().TableDefinitionParts.First().Table.AutoFilter!.Reference!.Value!));
+        Assert.Equal("A3:B4", WithWorksheet(bytes, (ws, wb) => wb.WorksheetParts.First().TableDefinitionParts.First().Table!.AutoFilter!.Reference!.Value!));
         Assert.Equal(string.Empty, Text(bytes, "A4"));
     }
 
@@ -203,7 +203,7 @@ public sealed class WorkbookBehaviourTests : IDisposable
         var bytes = Render(template, new { items = new[] { new { n = "a" }, new { n = "b" }, new { n = "c" } } });
 
         Assert.Equal("A3:A7", TableRef(bytes));
-        Assert.Equal("A3:A6", WithWorksheet(bytes, (ws, wb) => wb.WorksheetParts.First().TableDefinitionParts.First().Table.AutoFilter!.Reference!.Value!));
+        Assert.Equal("A3:A6", WithWorksheet(bytes, (ws, wb) => wb.WorksheetParts.First().TableDefinitionParts.First().Table!.AutoFilter!.Reference!.Value!));
     }
 
     // ---- X-10 / X-11 two tables, shifts
@@ -433,7 +433,7 @@ public sealed class WorkbookBehaviourTests : IDisposable
         XlsxGolden.AssertValid(bytes);
         using var stream = new MemoryStream(bytes);
         using var document = SpreadsheetDocument.Open(stream, false);
-        Assert.Equal(new[] { "First", "Second" }, document.WorkbookPart!.Workbook.Descendants<Sheet>().Select(s => s.Name!.Value!).ToArray());
+        Assert.Equal(new[] { "First", "Second" }, document.WorkbookPart!.Workbook!.Descendants<Sheet>().Select(s => s.Name!.Value!).ToArray());
         Assert.Equal(2, document.WorkbookPart.WorksheetParts.Count());
     }
 
@@ -445,7 +445,7 @@ public sealed class WorkbookBehaviourTests : IDisposable
         var date = Cells(bytes)["B1"];
         Assert.Equal("43895", date.CellValue!.Text);
         Assert.NotEqual(CellValues.String, date.DataType?.Value);
-        var styleCount = WithWorksheet(bytes, (_, wb) => wb.WorkbookStylesPart!.Stylesheet.CellFormats!.Elements<CellFormat>().Count());
+        var styleCount = WithWorksheet(bytes, (_, wb) => wb.WorkbookStylesPart!.Stylesheet!.CellFormats!.Elements<CellFormat>().Count());
         Assert.True(date.StyleIndex!.Value < styleCount);
         Assert.Equal("12.5", Cells(bytes)["C1"].CellValue!.Text);
     }

@@ -23,7 +23,7 @@ public class CollectionFiltersTests
     [Fact]
     public void XPathSelectMany_ReturnsAllNodeValues()
     {
-        var result = CollectionFilters.XPathSelectMany("<a><b>x</b><b>y</b></a>", "/a/b").Cast<object>().ToList();
+        var result = CollectionFilters.XPathSelectMany("<a><b>x</b><b>y</b></a>", "/a/b")!.Cast<object>().ToList();
         Assert.Equal(new object[] { "x", "y" }, result);
         Assert.Equal("", CollectionFilters.XPathSelectMany("", "/a"));
     }
@@ -91,7 +91,7 @@ public class CollectionFiltersTests
     public void GroupBy_GroupsByPropertyValue()
     {
         var items = new List<object> { new Hash { ["t"] = "A", ["i"] = 1 }, new Hash { ["t"] = "B", ["i"] = 2 }, new Hash { ["t"] = "A", ["i"] = 3 } };
-        var groups = CollectionFilters.GroupBy(items, "t").Cast<Hash>().ToList();
+        var groups = CollectionFilters.GroupBy(items, "t")!.Cast<Hash>().ToList();
         Assert.Equal(2, groups.Count);
         Assert.Equal("A", groups[0]["Key"]);
         Assert.Equal(2, ((List<object>)groups[0]["Items"]).Count);

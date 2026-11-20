@@ -17,7 +17,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/arrayToGroup.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/groupBy.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
             var dateString = "\r\nGroup: A Item: item1Group: B Item: item2Group: B Item: item3";

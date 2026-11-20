@@ -61,7 +61,7 @@ public sealed class SecurityBackportTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(new Engine().Render(template, new { flag = true }));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().First();
+        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Cell>().First();
         Assert.Equal(CellValues.Boolean, cell.DataType!.Value);
         Assert.Equal("1", cell.CellValue!.Text);
     }
@@ -74,7 +74,7 @@ public sealed class SecurityBackportTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(new Engine().Render(template, new { flag = false }));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().First();
+        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Cell>().First();
         Assert.Equal("0", cell.CellValue!.Text);
     }
 
@@ -138,7 +138,7 @@ public sealed class SecurityBackportTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(new Engine().Render("", JObject.Parse(Workbook)));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        var cells = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().ToList();
+        var cells = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Cell>().ToList();
         Assert.Equal(4, cells.Count);
         Assert.Equal(CellValues.String, cells[0].DataType!.Value);
         Assert.Equal("Name", cells[0].CellValue!.Text);
@@ -158,7 +158,7 @@ public sealed class SecurityBackportTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(new Engine().Render("", JObject.Parse(json)));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        var first = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().First();
+        var first = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Cell>().First();
         Assert.Equal(CellValues.String, first.DataType!.Value);
     }
 
@@ -171,7 +171,7 @@ public sealed class SecurityBackportTests : IDisposable
 
         stream.Position = 0;
         using var document = SpreadsheetDocument.Open(stream, false);
-        Assert.Single(document.WorkbookPart!.Workbook.Descendants<Sheet>());
+        Assert.Single(document.WorkbookPart!.Workbook!.Descendants<Sheet>());
     }
 }
 

@@ -39,7 +39,7 @@ public sealed class TemplatingEngineTests : IDisposable
     private static string? FirstCellText(Stream stream)
     {
         using var document = SpreadsheetDocument.Open(stream, false);
-        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().First();
+        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Cell>().First();
         return cell.InlineString?.Text?.Text ?? cell.CellValue?.Text;
     }
 
@@ -82,7 +82,7 @@ public sealed class TemplatingEngineTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(new Engine().Render(template, new { amount = 12.5 }));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Cell>().First();
+        var cell = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Cell>().First();
         Assert.Equal("12.5", cell.CellValue?.Text);
     }
 

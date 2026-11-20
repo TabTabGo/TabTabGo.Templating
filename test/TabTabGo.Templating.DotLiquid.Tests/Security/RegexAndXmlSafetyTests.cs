@@ -58,6 +58,6 @@ public class RegexAndXmlSafetyTests
     {
         Assert.Equal("v", ValueFilters.XPathSelect("<a><b>v</b></a>", "/a/b"));
         Assert.Equal(new object[] { "1", "2" }, new System.Collections.Generic.List<object>(
-            System.Linq.Enumerable.Cast<object>(CollectionFilters.XPathSelectMany("<a><b>1</b><b>2</b></a>", "/a/b"))));
+            System.Linq.Enumerable.Cast<object>(CollectionFilters.XPathSelectMany("<a><b>1</b><b>2</b></a>", "/a/b")!)));
     }
 }

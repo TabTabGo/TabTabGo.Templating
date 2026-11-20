@@ -27,14 +27,14 @@ public class JObjectFiltersTests
     [Fact]
     public void JSelectTokenValues_ReturnsScalarValues()
     {
-        var values = JObjectFilters.JSelectTokenValues(Json, "$.items[*].n").Select(v => v.ToString());
+        var values = JObjectFilters.JSelectTokenValues(Json, "$.items[*].n").Select(v => v!.ToString());
         Assert.Equal(new[] { "x", "y" }, values);
     }
 
     [Fact]
     public void JSelectTokenValuesByProperty_CombinesRootAndProperty()
     {
-        var values = JObjectFilters.JSelectTokenValuesByProperty(Json, "$.items[*].", "n").Select(v => v.ToString());
+        var values = JObjectFilters.JSelectTokenValuesByProperty(Json, "$.items[*].", "n").Select(v => v!.ToString());
         Assert.Equal(new[] { "x", "y" }, values);
     }
 

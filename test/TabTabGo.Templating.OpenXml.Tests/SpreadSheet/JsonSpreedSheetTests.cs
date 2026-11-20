@@ -37,9 +37,9 @@ public sealed class JsonSpreedSheetTests : IDisposable
         new JsonSpreedSheet().CreateExcelDoc(path, JObject.Parse(EmptyWorkbook));
 
         using var document = SpreadsheetDocument.Open(path, false);
-        var sheet = Assert.Single(document.WorkbookPart!.Workbook.Descendants<DocumentFormat.OpenXml.Spreadsheet.Sheet>());
+        var sheet = Assert.Single(document.WorkbookPart!.Workbook!.Descendants<DocumentFormat.OpenXml.Spreadsheet.Sheet>());
         Assert.Equal("Report", sheet.Name?.Value);
-        var column = Assert.Single(document.WorkbookPart.WorksheetParts.First().Worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Column>());
+        var column = Assert.Single(document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<DocumentFormat.OpenXml.Spreadsheet.Column>());
         Assert.Equal(14.5, column.Width?.Value);
         Assert.True(column.CustomWidth?.Value);
     }
@@ -50,6 +50,6 @@ public sealed class JsonSpreedSheetTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(new Templating.OpenXml.SpreadSheet.TemplatingEngine().Render("", JObject.Parse(EmptyWorkbook)));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        Assert.Single(document.WorkbookPart!.Workbook.Descendants<DocumentFormat.OpenXml.Spreadsheet.Sheet>());
+        Assert.Single(document.WorkbookPart!.Workbook!.Descendants<DocumentFormat.OpenXml.Spreadsheet.Sheet>());
     }
 }

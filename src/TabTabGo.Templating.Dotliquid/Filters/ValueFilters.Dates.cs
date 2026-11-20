@@ -162,7 +162,7 @@ public static partial class ValueFilters
                 : date.ToString(format, string.IsNullOrEmpty(locale) ? CultureInfo.CurrentCulture : new CultureInfo(locale));
         }
 
-        return dateObject.ToString();
+        return dateObject?.ToString();
     }
 
     /// <summary>Parses text into a date-time (invariant culture, or the exact <paramref name="format"/>); text that is not a date is returned unchanged.</summary>

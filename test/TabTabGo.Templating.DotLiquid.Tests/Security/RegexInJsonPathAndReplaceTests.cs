@@ -73,7 +73,7 @@ public class RegexInJsonPathAndReplaceTests
     {
         var data = JObject.Parse("""{"arr":[{"n":"abc"},{"n":"xyz"}]}""");
 
-        var values = JObjectFilters.JSelectTokenValues(data, "$.arr[?(@.n =~ /^a/)].n").Select(v => v.ToString());
+        var values = JObjectFilters.JSelectTokenValues(data, "$.arr[?(@.n =~ /^a/)].n").Select(v => v!.ToString());
 
         Assert.Equal(new[] { "abc" }, values);
     }

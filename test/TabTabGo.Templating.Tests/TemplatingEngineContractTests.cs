@@ -19,13 +19,13 @@ public class TemplatingEngineContractTests
 
         public override void ParseTemplate(string templatePath) => _parsed.Add(templatePath);
 
-        public override object Render(string templatePath, object sourceData, string culture = "en-Us")
+        public override object Render(string templatePath, object? sourceData, string culture = "en-Us")
         {
             ParseTemplate(templatePath);
             return $"{templatePath}|{sourceData}|{culture}";
         }
 
-        public override string RenderString(string templateString, object sourceData, string culture = "en-Us")
+        public override string RenderString(string templateString, object? sourceData, string culture = "en-Us")
             => $"{templateString}|{sourceData}|{culture}";
 
         public override void RegisterFilter(Type type) => RegisteredFilters.Add(type);

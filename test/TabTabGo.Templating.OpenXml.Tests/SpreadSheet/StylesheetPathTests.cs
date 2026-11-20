@@ -47,7 +47,7 @@ public sealed class StylesheetPathTests : IDisposable
         using var result = Assert.IsType<MemoryStream>(EngineWithRoot().Render("", Workbook("styles.xml")));
 
         using var document = SpreadsheetDocument.Open(result, false);
-        Assert.Single(document.WorkbookPart!.WorkbookStylesPart!.Stylesheet.Descendants<Font>());
+        Assert.Single(document.WorkbookPart!.WorkbookStylesPart!.Stylesheet!.Descendants<Font>());
     }
 
     [Fact]
