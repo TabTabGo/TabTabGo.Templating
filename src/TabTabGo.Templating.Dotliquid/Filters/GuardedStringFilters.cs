@@ -9,21 +9,18 @@ namespace TabTabGo.Templating.Liquid.Filters;
 /// <summary>
 /// DotLiquid's growing filters (<c>Append</c>, <c>Prepend</c>, <c>Join</c>, <c>Replace</c>, <c>ReplaceFirst</c>, <c>Plus</c>, <c>Times</c>,
 /// <c>Concat</c>) with a size check against <see cref="TemplatingOptions.MaxOutputCharacters"/> before anything is allocated. Registered after
-/// the stock filters so these win; within the limit they return what the stock filters return.
+/// the stock filters so these win; within the limit they return exactly what the stock DotLiquid filters return at every syntax level
+/// (the differential test <c>GuardedFiltersStockParityTests</c> pins it).
 /// </summary>
-public static class GuardedStringFilters
+internal static class GuardedStringFilters
 {
     /// <summary>Appends <paramref name="operand"/> to <paramref name="input"/>.</summary>
     /// <param name="input">The text.</param>
     /// <param name="operand">The text to append.</param>
     public static string? Append(string? input, string? operand)
     {
-        if (input == null)
-        {
-            return input;
-        }
-
-        RenderBudget.Check((long)input.Length + (operand?.Length ?? 0));
+        // stock is plain concatenation: a nil input gives the operand, two nils give an empty string
+        RenderBudget.Check((long)(input?.Length ?? 0) + (operand?.Length ?? 0));
         return input + operand;
     }
 
@@ -32,16 +29,11 @@ public static class GuardedStringFilters
     /// <param name="operand">The text to prepend.</param>
     public static string? Prepend(string? input, string? operand)
     {
-        if (input == null)
-        {
-            return input;
-        }
-
-        RenderBudget.Check((long)input.Length + (operand?.Length ?? 0));
+        RenderBudget.Check((long)(input?.Length ?? 0) + (operand?.Length ?? 0));
         return operand + input;
     }
 
-    /// <summary>Joins the items of a list (nested lists are flattened) with <paramref name="glue"/>.</summary>
+    /// <summary>Joins the items of a list with <paramref name="glue"/>.</summary>
     /// <param name="input">The list.</param>
     /// <param name="glue">The separator, default one space.</param>
     public static string? Join(IEnumerable? input, string? glue = " ")
@@ -54,7 +46,7 @@ public static class GuardedStringFilters
         var builder = new StringBuilder();
         var first = true;
         long count = 0;
-        foreach (var item in Flatten(input))
+        foreach (var item in input) // not flattened: a nested list prints as the stock filter prints it
         {
             RenderBudget.CheckItems(++count);
             if ((count & 1023) == 0)
@@ -159,32 +151,49 @@ public static class GuardedStringFilters
         }
 
         replacement ??= string.Empty;
+        var literal = context.SyntaxCompatibilityLevel >= SyntaxCompatibility.DotLiquid21;
+
+        if (literal && count == 1)
+        {
+            // the stock ReplaceFirst: a culture-sensitive search, and the length of the search text is what is removed
+            var position = input.IndexOf(find);
+            if (position < 0)
+            {
+                return input;
+            }
+
+            RenderBudget.Check((long)input.Length - find.Length + replacement.Length);
+            return input.Remove(position, find.Length).Insert(position, replacement);
+        }
+
         var builder = new StringBuilder();
         var last = 0;
         var done = 0;
 
-        if (context.SyntaxCompatibilityLevel >= SyntaxCompatibility.DotLiquid22)
+        if (literal)
         {
+            // the stock Replace: string.Replace, an ordinal literal replacement
             int at;
-            while ((count < 0 || done < count) && (at = input.IndexOf(find, last, StringComparison.Ordinal)) >= 0)
+            while ((at = input.IndexOf(find, last, StringComparison.Ordinal)) >= 0)
             {
                 RenderBudget.ThrowIfCancelled();
                 RenderBudget.Check(builder.Length + (long)(at - last) + replacement.Length + (input.Length - at - find.Length));
                 builder.Append(input, last, at - last).Append(replacement);
                 last = at + find.Length;
-                done++;
             }
         }
         else
         {
-            // the stock 2.0 behaviour: the search text is a regular expression with the process-wide time-out, the replacement may use $1
+            // the stock 2.0 behaviour: the search text is a regular expression with the process-wide time-out; Replace expands $1 in the
+            // replacement, ReplaceFirst inserts it literally
             var regex = new Regex(find, RegexOptions.None, Template.RegexTimeOut);
             for (var match = regex.Match(input); match.Success && (count < 0 || done < count); match = match.NextMatch())
             {
                 RenderBudget.ThrowIfCancelled();
                 // the size is estimated before Match.Result allocates: a replacement such as "$_$_$_" would otherwise be built first and checked after
-                RenderBudget.Check(builder.Length + (long)(match.Index - last) + RenderBudget.ExpansionBound(replacement, match.Length, input.Length) + (input.Length - match.Index - match.Length));
-                builder.Append(input, last, match.Index - last).Append(match.Result(replacement));
+                var inserted = count < 0 ? RenderBudget.ExpansionBound(replacement, match.Length, input.Length) : replacement.Length;
+                RenderBudget.Check(builder.Length + (long)(match.Index - last) + inserted + (input.Length - match.Index - match.Length));
+                builder.Append(input, last, match.Index - last).Append(count < 0 ? match.Result(replacement) : replacement);
                 last = match.Index + match.Length;
                 done++;
             }
@@ -193,23 +202,5 @@ public static class GuardedStringFilters
         builder.Append(input, last, input.Length - last);
         RenderBudget.Check(builder.Length); // defence in depth: the pre-checks above are estimates
         return builder.ToString();
-    }
-
-    private static IEnumerable<object?> Flatten(IEnumerable input)
-    {
-        foreach (var item in input)
-        {
-            if (item is IEnumerable nested and not string)
-            {
-                foreach (var inner in Flatten(nested))
-                {
-                    yield return inner;
-                }
-            }
-            else
-            {
-                yield return item;
-            }
-        }
     }
 }

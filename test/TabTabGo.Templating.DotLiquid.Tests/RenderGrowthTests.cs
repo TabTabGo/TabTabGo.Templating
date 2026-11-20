@@ -56,7 +56,7 @@ public sealed class RenderGrowthTests
     public void AppendPrepend_WithinTheLimit_KeepTheirMeaning()
     {
         Assert.Equal("a-b|b-a|", Engine(100).RenderString("{{ 'a' | Append: '-b' }}|{{ 'a' | Prepend: 'b-' }}|", new { }));
-        Assert.Equal("", Engine(100).RenderString("{{ nothing | Append: 'x' }}", new { }));
+        Assert.Equal("x", Engine(100).RenderString("{{ nothing | Append: 'x' }}", new { })); // stock: a nil input gives the operand
     }
 
     [Fact]
