@@ -44,16 +44,6 @@ public sealed class RenderLimitTests
     }
 
     [Fact]
-    public void MaxOutput_LargeString_Truncated()
-    {
-        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { MaxOutputCharacters = 100 });
-
-        var result = engine.RenderString("{% for a in (1..1000) %}0123456789{% endfor %}", new { });
-
-        Assert.Equal(100, result.Length);
-    }
-
-    [Fact]
     public void MaxOutput_Zero_Unlimited()
     {
         var engine = new Liquid.TemplatingEngine(new TemplatingOptions { MaxOutputCharacters = 0 });

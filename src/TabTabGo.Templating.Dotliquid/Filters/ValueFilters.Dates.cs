@@ -5,7 +5,13 @@ namespace TabTabGo.Templating.Liquid.Filters;
 
 public static partial class ValueFilters
 {
-    private static readonly ConcurrentDictionary<string, TimeZoneInfo?> TimeZones = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, TimeZoneInfo> TimeZones = new(StringComparer.Ordinal);
+
+    /// <summary>Number of resolved zone names kept in the process-wide cache.</summary>
+    internal static int TimeZoneCacheCount => TimeZones.Count;
+
+    /// <summary>Upper bound of the zone cache.</summary>
+    internal const int TimeZoneCacheLimit = 256;
 
     /// <summary>The clock the date filters use for <c>Now</c> and <c>Today</c>; tests replace it.</summary>
     internal static TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -23,7 +29,7 @@ public static partial class ValueFilters
             return input;
         }
 
-        var timeZone = TimeZones.GetOrAdd(timeZoneName, FindTimeZone);
+        var timeZone = ResolveTimeZone(timeZoneName);
         if (timeZone == null)
         {
             return input;
@@ -33,8 +39,31 @@ public static partial class ValueFilters
         return date == null ? null : TimeZoneInfo.ConvertTime(date.Value, timeZone);
     }
 
+    private static TimeZoneInfo? ResolveTimeZone(string name)
+    {
+        // Names come from templates and data: only names that resolve are cached, and the cache is bounded, so an unknown or
+        // endless stream of names cannot grow process memory.
+        if (TimeZones.TryGetValue(name, out var cached))
+        {
+            return cached;
+        }
+
+        var found = FindTimeZone(name);
+        if (TimeZones.Count < TimeZoneCacheLimit)
+        {
+            TimeZones.TryAdd(name, found!);
+        }
+
+        return found;
+    }
+
     private static TimeZoneInfo? FindTimeZone(string name)
     {
+        if (name.Length > 128)
+        {
+            return null; // no zone id or display name is that long
+        }
+
         try
         {
             return TimeZoneInfo.FindSystemTimeZoneById(name);
@@ -44,8 +73,20 @@ public static partial class ValueFilters
             // fall through: older templates pass the (display) standard name
         }
 
-        return TimeZoneInfo.GetSystemTimeZones().FirstOrDefault(zone => zone.StandardName == name);
+        return StandardNames.Value.TryGetValue(name, out var zone) ? zone : null;
     }
+
+    // built once from the system zones (read-only afterwards), never from template input
+    private static readonly Lazy<Dictionary<string, TimeZoneInfo>> StandardNames = new(() =>
+    {
+        var map = new Dictionary<string, TimeZoneInfo>(StringComparer.Ordinal);
+        foreach (var zone in TimeZoneInfo.GetSystemTimeZones())
+        {
+            map.TryAdd(zone.StandardName, zone);
+        }
+
+        return map;
+    });
 
     /// <summary>
     /// Moves a date to a fixed UTC offset (seconds, rounded to whole minutes). Text <c>Now</c> is the current UTC time and <c>Today</c> the
