@@ -1,190 +1,207 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using DotLiquid;
+﻿using System.Collections.Concurrent;
 using System.Globalization;
 
-namespace TabTabGo.Templating.Liquid.Filters
+namespace TabTabGo.Templating.Liquid.Filters;
+
+public static partial class ValueFilters
 {
-    public static partial class ValueFilters
+    private static readonly ConcurrentDictionary<string, TimeZoneInfo?> TimeZones = new(StringComparer.Ordinal);
+
+    /// <summary>The clock the date filters use for <c>Now</c> and <c>Today</c>; tests replace it.</summary>
+    internal static TimeProvider Clock { get; set; } = TimeProvider.System;
+
+    /// <summary>
+    /// Converts a date to a time zone given by IANA id (<c>Asia/Dubai</c>), Windows id (<c>Arabian Standard Time</c>) or, as before,
+    /// the zone's standard name. The zone's daylight saving rules apply. An unknown zone returns the input unchanged.
+    /// </summary>
+    /// <param name="input">A date, a date-time, or text that parses as one.</param>
+    /// <param name="timeZoneName">The zone name.</param>
+    public static object? ToTimeZone(object? input, string? timeZoneName)
     {
-        public static object ToTimeZone(object input, string timeZoneName)
+        if (string.IsNullOrEmpty(timeZoneName))
         {
-            if (string.IsNullOrEmpty(timeZoneName))
-            {
-                return input;
-            }
-
-            //https://msdn.microsoft.com/en-us/library/gg154758.aspx useful list of timezone ids and names
-            var timeZone = TimeZoneInfo.GetSystemTimeZones().Where(a => a.StandardName == timeZoneName).FirstOrDefault();
-
-            if (timeZone == null)
-            {
-                return input;
-            }
-
-            return OffsetDate(input, (int)timeZone.BaseUtcOffset.TotalSeconds);
+            return input;
         }
 
-        public static DateTimeOffset? OffsetDate(object input, int offset)
+        var timeZone = TimeZones.GetOrAdd(timeZoneName, FindTimeZone);
+        if (timeZone == null)
         {
-            if (input is DateTimeOffset)
-            {
-                return ((DateTimeOffset)input).ToUniversalTime().ToOffset(TimeSpan.FromSeconds(offset));
-            }
+            return input;
+        }
 
-            if (input is DateTime)
-            {
-                return (new DateTimeOffset((DateTime)input)).ToUniversalTime().ToOffset(TimeSpan.FromSeconds(offset));
-            }
+        var date = ToDateTimeOffset(input);
+        return date == null ? null : TimeZoneInfo.ConvertTime(date.Value, timeZone);
+    }
 
-            if (input is string)
-            {
-                DateTimeOffset date;
+    private static TimeZoneInfo? FindTimeZone(string name)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(name);
+        }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
+        {
+            // fall through: older templates pass the (display) standard name
+        }
 
-                if (DateTimeOffset.TryParse((string)input, out date))
-                {
-                    return date.ToUniversalTime().ToOffset(TimeSpan.FromSeconds(offset));
-                }
-                else
-                {
-                    if (((string)input).Equals("Now", StringComparison.CurrentCultureIgnoreCase) || ((string)input).Equals("Today", StringComparison.CurrentCultureIgnoreCase))
-                    {
-                        return DateTimeOffset.UtcNow.ToOffset(TimeSpan.FromSeconds(offset));
-                    }
-                }
-            }
+        return TimeZoneInfo.GetSystemTimeZones().FirstOrDefault(zone => zone.StandardName == name);
+    }
 
-            if (input == null)
-            {
+    /// <summary>
+    /// Moves a date to a fixed UTC offset (seconds, rounded to whole minutes). Text <c>Now</c> is the current UTC time and <c>Today</c> the
+    /// current UTC date; a date-time of unspecified kind is taken as UTC.
+    /// </summary>
+    /// <param name="input">A date, a date-time, or text that parses as one.</param>
+    /// <param name="offset">Offset from UTC in seconds.</param>
+    /// <exception cref="ArgumentException">The input is not a date.</exception>
+    public static DateTimeOffset? OffsetDate(object? input, int offset)
+    {
+        var date = ToDateTimeOffset(input);
+        return date?.ToUniversalTime().ToOffset(TimeSpan.FromMinutes(Math.Round(offset / 60.0)));
+    }
+
+    private static DateTimeOffset? ToDateTimeOffset(object? input)
+    {
+        switch (input)
+        {
+            case null:
                 return null;
-            }
+            case DateTimeOffset offset:
+                return offset;
+            case DateTime dateTime:
+                // Unspecified is documented as UTC; the server's time zone must not change a report (F-10)
+                return dateTime.Kind == DateTimeKind.Local
+                    ? new DateTimeOffset(dateTime)
+                    : new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc));
+            case DateOnly dateOnly:
+                return new DateTimeOffset(dateOnly.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            case string text:
+                if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+                {
+                    return parsed;
+                }
 
-            throw new Exception("Object must be either a DateTime or a dateTimeOffset in order to offset it");
+                if (text.Equals("Now", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Clock.GetUtcNow();
+                }
+
+                if (text.Equals("Today", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new DateTimeOffset(Clock.GetUtcNow().UtcDateTime.Date, TimeSpan.Zero);
+                }
+
+                break;
         }
 
-        public static string FormatDate(object dateObject, string format, string locale = null)
+        throw new ArgumentException("The value must be a DateTime, a DateTimeOffset or text that is a date.", nameof(input));
+    }
+
+    /// <summary>Formats a date with a .NET format string (or Ruby strftime tokens when enabled and no locale is given).</summary>
+    /// <param name="dateObject">A date, a date-time, or the text <c>Now</c>/<c>Today</c>.</param>
+    /// <param name="format">The format string.</param>
+    /// <param name="locale">Culture name; the render culture when empty.</param>
+    public static string? FormatDate(object? dateObject, string format, string? locale = null)
+    {
+        if (dateObject == null)
         {
-            if (dateObject == null)
-            {
-                return null;
-            }
-
-            if (dateObject is string)
-            {
-                if (((string)dateObject).Equals("Now", StringComparison.CurrentCultureIgnoreCase) || ((string)dateObject).Equals("Today", StringComparison.CurrentCultureIgnoreCase))
-                {
-                    dateObject = DateTimeOffset.Now;
-                }
-            }
-
-            if (dateObject is DateTimeOffset)
-            {
-                var date = (DateTimeOffset)dateObject;
-                return DotLiquid.Liquid.UseRubyDateFormat && string.IsNullOrEmpty(locale)
-                    ? RubyDateTimeFormatter.ToString(date, format)
-                    : date.ToString(format, string.IsNullOrEmpty(locale) ? CultureInfo.CurrentCulture : new CultureInfo(locale));
-            }
-
-            if (dateObject is DateTime)
-            {
-                var date = new DateTimeOffset((DateTime)dateObject);
-                return DotLiquid.Liquid.UseRubyDateFormat && string.IsNullOrEmpty(locale)
-                    ? RubyDateTimeFormatter.ToString(date, format)
-                    : date.ToString(format, string.IsNullOrEmpty(locale) ? CultureInfo.CurrentCulture : new CultureInfo(locale));
-            }
-
-            return dateObject.ToString();
+            return null;
         }
 
-        public static object ParseDate(string input, string format)
+        if (dateObject is string text && (text.Equals("Now", StringComparison.OrdinalIgnoreCase) || text.Equals("Today", StringComparison.OrdinalIgnoreCase)))
         {
-            if (string.IsNullOrEmpty(input))
+            dateObject = ToDateTimeOffset(text);
+        }
+
+        if (dateObject is DateTimeOffset or DateTime or DateOnly)
+        {
+            var date = ToDateTimeOffset(dateObject)!.Value;
+            return DotLiquid.Liquid.UseRubyDateFormat && string.IsNullOrEmpty(locale)
+                ? RubyDateTimeFormatter.ToString(date, format)
+                : date.ToString(format, string.IsNullOrEmpty(locale) ? CultureInfo.CurrentCulture : new CultureInfo(locale));
+        }
+
+        return dateObject.ToString();
+    }
+
+    /// <summary>Parses text into a date-time (invariant culture, or the exact <paramref name="format"/>); text that is not a date is returned unchanged.</summary>
+    /// <param name="input">The text.</param>
+    /// <param name="format">An exact format, or empty for general parsing.</param>
+    public static object? ParseDate(string? input, string? format)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return input;
+        }
+
+        var parsed = string.IsNullOrEmpty(format)
+            ? DateTime.TryParse(input, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            : DateTime.TryParseExact(input, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out date);
+        return parsed ? date : input;
+    }
+}
+
+/// <summary>Formats dates with Ruby <c>strftime</c> tokens (<c>%Y-%m-%d</c>), used when DotLiquid's Ruby date format is switched on.</summary>
+public static class RubyDateTimeFormatter
+{
+    /// <summary>Formats one token.</summary>
+    /// <param name="dateTimeOffset">The date.</param>
+    public delegate string DateTimeOffsetDelegate(DateTimeOffset dateTimeOffset);
+
+    private static readonly Dictionary<string, DateTimeOffsetDelegate> Formats = new()
+    {
+        { "a", (dateTime) => dateTime.ToString("ddd", CultureInfo.CurrentCulture) },
+        { "A", (dateTime) => dateTime.ToString("dddd", CultureInfo.CurrentCulture) },
+        { "b", (dateTime) => dateTime.ToString("MMM", CultureInfo.CurrentCulture) },
+        { "B", (dateTime) => dateTime.ToString("MMMM", CultureInfo.CurrentCulture) },
+        { "c", (dateTime) => dateTime.ToString("ddd MMM dd HH:mm:ss yyyy", CultureInfo.CurrentCulture) },
+        { "d", (dateTime) => dateTime.ToString("dd", CultureInfo.CurrentCulture) },
+        { "e", (dateTime) => dateTime.ToString("%d", CultureInfo.CurrentCulture).PadLeft(2, ' ') },
+        { "H", (dateTime) => dateTime.ToString("HH", CultureInfo.CurrentCulture) },
+        { "I", (dateTime) => dateTime.ToString("hh", CultureInfo.CurrentCulture) },
+        { "j", (dateTime) => dateTime.DayOfYear.ToString(CultureInfo.CurrentCulture).PadLeft(3, '0') },
+        { "m", (dateTime) => dateTime.ToString("MM", CultureInfo.CurrentCulture) },
+        { "M", (dateTime) => dateTime.Minute.ToString(CultureInfo.CurrentCulture).PadLeft(2, '0') },
+        { "p", (dateTime) => dateTime.ToString("tt", CultureInfo.CurrentCulture) },
+        { "S", (dateTime) => dateTime.ToString("ss", CultureInfo.CurrentCulture) },
+        { "U", (dateTime) => CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(dateTime.DateTime, CultureInfo.CurrentCulture.DateTimeFormat.CalendarWeekRule, DayOfWeek.Sunday).ToString(CultureInfo.CurrentCulture).PadLeft(2, '0') },
+        { "W", (dateTime) => CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(dateTime.DateTime, CultureInfo.CurrentCulture.DateTimeFormat.CalendarWeekRule, DayOfWeek.Monday).ToString(CultureInfo.CurrentCulture).PadLeft(2, '0') },
+        { "w", (dateTime) => ((int)dateTime.DayOfWeek).ToString(CultureInfo.CurrentCulture) },
+        { "x", (dateTime) => dateTime.ToString("d", CultureInfo.CurrentCulture) },
+        { "X", (dateTime) => dateTime.ToString("T", CultureInfo.CurrentCulture) },
+        { "y", (dateTime) => dateTime.ToString("yy", CultureInfo.CurrentCulture) },
+        { "Y", (dateTime) => dateTime.ToString("yyyy", CultureInfo.CurrentCulture) },
+        { "Z", (dateTime) => dateTime.ToString("zzz", CultureInfo.CurrentCulture) },
+        { "%", (dateTime) => "%" },
+    };
+
+    /// <summary>Formats <paramref name="dateTime"/> with <paramref name="pattern"/>; unknown tokens are kept as written.</summary>
+    /// <param name="dateTime">The date.</param>
+    /// <param name="pattern">The pattern with <c>%</c> tokens.</param>
+    public static string ToString(DateTimeOffset dateTime, string pattern)
+    {
+        var output = new System.Text.StringBuilder();
+        var n = 0;
+        while (n < pattern.Length)
+        {
+            var s = pattern.Substring(n, 1);
+            if (n + 1 >= pattern.Length)
             {
-                return input;
+                output.Append(s);
             }
-
-            DateTime date;
-
-            if (string.IsNullOrEmpty(format))
+            else if (s == "%")
             {
-                if (!DateTime.TryParse(input, out date))
-                {
-                    return input;
-                }
-                else
-                {
-                    return date;
-                }
+                var token = pattern.Substring(++n, 1);
+                output.Append(Formats.TryGetValue(token, out var format) ? format(dateTime) : "%" + token);
             }
             else
             {
-                if (!DateTime.TryParseExact(input, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
-                {
-                    return input;
-                }
-                else
-                {
-                    return date;
-                }
-            }
-        }
-
-    }
-
-    public static class RubyDateTimeFormatter
-    {
-        public delegate string DateTimeOffsetDelegate(DateTimeOffset dateTimeOffset);
-
-        private static readonly Dictionary<string, DateTimeOffsetDelegate> Formats = new Dictionary<string, DateTimeOffsetDelegate>
-        {
-            { "a", (dateTime) => dateTime.ToString("ddd", CultureInfo.CurrentCulture) },
-            { "A", (dateTime) => dateTime.ToString("dddd", CultureInfo.CurrentCulture) },
-            { "b", (dateTime) => dateTime.ToString("MMM", CultureInfo.CurrentCulture) },
-            { "B", (dateTime) => dateTime.ToString("MMMM", CultureInfo.CurrentCulture) },
-            { "c", (dateTime) => dateTime.ToString("ddd MMM dd HH:mm:ss yyyy", CultureInfo.CurrentCulture) },
-            { "d", (dateTime) => dateTime.ToString("dd", CultureInfo.CurrentCulture) },
-            { "e", (dateTime) => dateTime.ToString("%d", CultureInfo.CurrentCulture).PadLeft(2, ' ') },
-            { "H", (dateTime) => dateTime.ToString("HH", CultureInfo.CurrentCulture) },
-            { "I", (dateTime) => dateTime.ToString("hh", CultureInfo.CurrentCulture) },
-            { "j", (dateTime) => dateTime.DayOfYear.ToString().PadLeft(3, '0') },
-            { "m", (dateTime) => dateTime.ToString("MM", CultureInfo.CurrentCulture) },
-            { "M", (dateTime) => dateTime.Minute.ToString().PadLeft(2, '0') },
-            { "p", (dateTime) => dateTime.ToString("tt", CultureInfo.CurrentCulture) },
-            { "S", (dateTime) => dateTime.ToString("ss", CultureInfo.CurrentCulture) },
-            { "U", (dateTime) => CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(dateTime.DateTime, CultureInfo.CurrentCulture.DateTimeFormat.CalendarWeekRule, DayOfWeek.Sunday).ToString().PadLeft(2, '0') },
-            { "W", (dateTime) => CultureInfo.CurrentCulture.Calendar.GetWeekOfYear(dateTime.DateTime, CultureInfo.CurrentCulture.DateTimeFormat.CalendarWeekRule, DayOfWeek.Monday).ToString().PadLeft(2, '0') },
-            { "w", (dateTime) => ((int) dateTime.DayOfWeek).ToString() },
-            { "x", (dateTime) => dateTime.ToString("d", CultureInfo.CurrentCulture) },
-            { "X", (dateTime) => dateTime.ToString("T", CultureInfo.CurrentCulture) },
-            { "y", (dateTime) => dateTime.ToString("yy", CultureInfo.CurrentCulture) },
-            { "Y", (dateTime) => dateTime.ToString("yyyy", CultureInfo.CurrentCulture) },
-            { "Z", (dateTime) => dateTime.ToString("zzz", CultureInfo.CurrentCulture) },
-            { "%", (dateTime) => "%" }
-        };
-
-        public static string ToString(DateTimeOffset dateTime, string pattern)
-        {
-            string output = "";
-
-            int n = 0;
-
-            while (n < pattern.Length)
-            {
-                string s = pattern.Substring(n, 1);
-
-                if (n + 1 >= pattern.Length)
-                    output += s;
-                else
-                    output += s == "%"
-                        ? Formats.ContainsKey(pattern.Substring(++n, 1)) ? Formats[pattern.Substring(n, 1)].Invoke(dateTime) : "%" + pattern.Substring(n, 1)
-                        : s;
-                n++;
+                output.Append(s);
             }
 
-            return output;
+            n++;
         }
+
+        return output.ToString();
     }
 }

@@ -153,7 +153,7 @@ public class ValueFiltersTests
 
         Assert.Null(ValueFilters.OffsetDate(null!, 0));
         Assert.NotNull(ValueFilters.OffsetDate("Now", 0));
-        Assert.Throws<Exception>(() => ValueFilters.OffsetDate(42, 0));
+        Assert.Throws<ArgumentException>(() => ValueFilters.OffsetDate(42, 0));
     }
 
     [Fact]

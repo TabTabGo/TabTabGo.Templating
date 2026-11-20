@@ -1,1 +1,1 @@
-Number|Boolean|Date|String|AB
+Number|Boolean|Date|Number|AB

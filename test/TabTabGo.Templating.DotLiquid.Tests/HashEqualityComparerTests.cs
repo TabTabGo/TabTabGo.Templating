@@ -29,9 +29,8 @@ public class HashEqualityComparerTests
     }
 
     [Fact]
-    public void GetHashCode_DelegatesToObject()
+    public void GetHashCode_IsContentBased_EmptyHashesAlike()
     {
-        var hash = new Hash();
-        Assert.Equal(hash.GetHashCode(), _comparer.GetHashCode(hash));
+        Assert.Equal(_comparer.GetHashCode(new Hash()), _comparer.GetHashCode(new Hash()));
     }
 }

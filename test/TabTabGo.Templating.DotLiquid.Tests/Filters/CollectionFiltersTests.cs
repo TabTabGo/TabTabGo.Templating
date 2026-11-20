@@ -66,8 +66,8 @@ public class CollectionFiltersTests
     [Fact]
     public void Distinct_Strings()
     {
-        var result = ((IEnumerable<string>)CollectionFilters.Distinct(new object[] { "a", "b", "a" })!).ToList();
-        Assert.Equal(new[] { "a", "b" }, result);
+        var result = ((IEnumerable<object?>)CollectionFilters.Distinct(new object[] { "a", "b", "a" })!).ToList();
+        Assert.Equal(new object[] { "a", "b" }, result);
         Assert.Null(CollectionFilters.Distinct(null!));
     }
 

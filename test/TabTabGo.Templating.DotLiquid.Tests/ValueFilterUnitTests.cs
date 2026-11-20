@@ -36,8 +36,9 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
-            var arabianTimeZone = TimeZoneInfo.GetSystemTimeZones().Where(a => a.StandardName == "Arabian Standard Time").FirstOrDefault();
-            var dateString = TimeZoneInfo.ConvertTime(DateTime.Parse((string)data.dateValue2).ToUniversalTime(), arabianTimeZone).ToString("yyyy-MM-dd HH:mm:ss");
+            // F-9: the zone is found by id (the Windows id "Arabian Standard Time" is UTC+4); a parsed date without a zone is UTC (F-10)
+            var arabianTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Arabian Standard Time");
+            var dateString = TimeZoneInfo.ConvertTime(DateTime.SpecifyKind(DateTime.Parse((string)data.dateValue2), DateTimeKind.Utc), arabianTimeZone).ToString("yyyy-MM-dd HH:mm:ss");
             Assert.Equal(dateString, renderedData);
         }
 

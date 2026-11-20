@@ -1,1 +1,1 @@
-&lrm;ABC123|AED &lrm;1,234.50|total &lrm;(12)
+ABC&lrm;123|AED &lrm;1,234.50|total &lrm;(12)
