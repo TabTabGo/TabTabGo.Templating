@@ -49,9 +49,9 @@ public static partial class ValueFilters
         }
 
         var found = FindTimeZone(name);
-        if (TimeZones.Count < TimeZoneCacheLimit)
+        if (found != null && TimeZones.Count < TimeZoneCacheLimit)
         {
-            TimeZones.TryAdd(name, found!);
+            TimeZones.TryAdd(name, found);
         }
 
         return found;

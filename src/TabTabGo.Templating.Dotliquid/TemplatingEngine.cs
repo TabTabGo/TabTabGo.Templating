@@ -75,6 +75,8 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
             Template.RegisterFilter(typeof(CustomFilters));
             Template.RegisterFilter(typeof(JObjectFilters));
             Template.RegisterFilter(typeof(OpenXmlFilters));
+            Template.RegisterFilter(typeof(GuardedStringFilters)); // after the stock filters: the guarded versions win
+            Template.RegisterTag<GuardedCapture>("capture");
             Template.RegisterSafeType(typeof(JToken), Array.Empty<string>());
             Template.RegisterTag<Increment>("increment");
 
