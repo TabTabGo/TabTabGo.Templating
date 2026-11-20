@@ -49,15 +49,21 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
     internal static long ParseCount => Interlocked.Read(ref _parseCount);
 
     /// <summary>
-    /// Registers the filters, the <c>increment</c> tag and the naming convention once per process. DotLiquid's process-wide
-    /// <c>Template.RegexTimeOut</c> is left alone: it also governs DotLiquid's own template-parse expressions, which a loaded host must not fail; the
-    /// engine's <see cref="TemplatingOptions.RegexTimeout"/> bounds the expressions a template supplies (read per render through <see cref="RenderScope"/>).
+    /// Registers the filters, the <c>increment</c> tag and the naming convention once per process, and lowers DotLiquid's
+    /// process-wide <c>Template.RegexTimeOut</c> (it governs DotLiquid's own template-parse expressions) to this engine's <see cref="TemplatingOptions.ParseTimeout"/>
+    /// ("the strictest engine wins"; it is never raised). <see cref="TemplatingOptions.RegexTimeout"/> bounds only the expressions a template supplies,
+    /// read per render through <see cref="RenderScope"/>, so a tight value cannot fail a valid parse.
     /// Every entry point calls it, so calling it yourself is optional.
     /// </summary>
     public void Initialize()
     {
         lock (InitLock)
         {
+            if (_options.ParseTimeout < Template.RegexTimeOut)
+            {
+                Template.RegexTimeOut = _options.ParseTimeout;
+            }
+
             if (_isInitialized)
             {
                 return;
@@ -118,6 +124,11 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
     public override string RenderString(string templateString, object? sourceData, string culture = "en-Us")
     {
         EnsureInitialized();
+        if (_options.MaxTemplateCharacters > 0 && templateString is { Length: > 0 } && templateString.Length > _options.MaxTemplateCharacters)
+        {
+            throw new RenderLimitExceededException($"The template string has more than {_options.MaxTemplateCharacters} characters (TemplatingOptions.MaxTemplateCharacters).");
+        }
+
         var template = Template.Parse(templateString); // parsed per call, so nothing is shared between renders
         var variables = new ObjectHasher(_options.MaxDepth).HashRoot(sourceData);
 
@@ -186,8 +197,8 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
 
     private void EnsureInitialized()
     {
-        // Cheap on the hot path: the lock is only taken until the process has been initialised.
-        if (!_isInitialized)
+        // Cheap on the hot path: the lock is only taken until this engine's parse time-out has been applied.
+        if (!_isInitialized || _options.ParseTimeout < Template.RegexTimeOut)
         {
             Initialize();
         }

@@ -27,6 +27,16 @@ internal static class TemplatingOptionsValidator
             throw new ArgumentOutOfRangeException(nameof(options), "RegexTimeout must be positive (or Timeout.InfiniteTimeSpan).");
         }
 
+        if (options.ParseTimeout <= TimeSpan.Zero || options.ParseTimeout > MaxTimeout)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "ParseTimeout must be positive and finite.");
+        }
+
+        if (options.MaxTemplateCharacters < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "MaxTemplateCharacters must not be negative (0 = unlimited).");
+        }
+
         if (options.RenderTimeout != Timeout.InfiniteTimeSpan && (options.RenderTimeout <= TimeSpan.Zero || options.RenderTimeout > MaxTimeout))
         {
             throw new ArgumentOutOfRangeException(nameof(options), "RenderTimeout must be positive (or Timeout.InfiniteTimeSpan).");
