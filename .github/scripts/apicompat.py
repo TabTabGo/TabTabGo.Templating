@@ -2,7 +2,7 @@
 """ApiCompat in assembly mode: the packed assemblies of this line against the previous line's published assemblies.
 
 Package validation cannot compare across target frameworks (a dropped TFM is PKV006 and no API comparison), so the surface check
-runs here (spec 12.5 V11-5). Needs the tool: dotnet tool install --global Microsoft.DotNet.ApiCompat.Tool.
+runs here (spec 12.5 V11-5). The tool comes from .config/dotnet-tools.json (exact version): dotnet tool restore. The packages are only read.
 
 Usage: apicompat.py <packed-dir> <left-tfm> <right-tfm> (--baseline-version 10.0.0 | --baseline-dir <dir with *.nupkg>)
 Exit code 0 only when no package reports a difference. A baseline that is not on nuget.org yet is an error unless
@@ -103,7 +103,7 @@ def main(argv: list[str]) -> int:
         left_refs = [framework_reference(args.left_tfm), str(left_dirs["TabTabGo.Templating"])] + package_references(["net10.0", "net9.0", "net8.0", "netstandard2.1", "netstandard2.0"])
         right_refs = [framework_reference(args.right_tfm), str(right_dirs["TabTabGo.Templating"])] + package_references([args.right_tfm, "net10.0", "net9.0", "net8.0", "netstandard2.1", "netstandard2.0"])
         for package_id in IDS:
-            command = ["apicompat", "-l", str(left_dirs[package_id] / f"{package_id}.dll"), "-r", str(right_dirs[package_id] / f"{package_id}.dll"),
+            command = ["dotnet", "tool", "run", "apicompat", "-l", str(left_dirs[package_id] / f"{package_id}.dll"), "-r", str(right_dirs[package_id] / f"{package_id}.dll"),
                        "--lref", ",".join(left_refs), "--rref", ",".join(right_refs), "--enable-rule-cannot-change-parameter-name"]
             process = subprocess.run(command, capture_output=True, text=True)
             print(f"== {package_id}: exit {process.returncode}")

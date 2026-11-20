@@ -70,7 +70,7 @@ Packages are published **only from tags**. There is no publish from `master` or 
 If a publish run fails part-way, do not re-run it: re-runs are refused. Fix the cause, bump the patch version and tag again.
 
 Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=10.0.0 -o out`. Package validation has no baseline on this line; the API surface is compared with the previous line by ApiCompat in assembly mode
-(`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, needs `dotnet tool install --global Microsoft.DotNet.ApiCompat.Tool`).
+(`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, tool pinned in `.config/dotnet-tools.json`, `dotnet tool restore`).
 
 ## Release notes 11.0.0
 

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "isRoot": true,
+  "tools": {
+    "microsoft.dotnet.apicompat.tool": {
+      "version": "11.0.100",
+      "commands": [
+        "apicompat"
+      ],
+      "rollForward": false
+    }
+  }
+}
