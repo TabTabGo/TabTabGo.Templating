@@ -79,4 +79,30 @@ public class CellExpressionTests
         Assert.Equal(ExpressionType.Binary, new BinaryOperation().ExpressionType);
         Assert.Equal(ExpressionType.Method, new ExpressionMethod().ExpressionType);
     }
+
+    [Fact]
+    public void ExpressionConstant_ToString_Quoted()
+    {
+        Assert.Equal("\"abc\"", new ExpressionConstant { Value = "abc" }.ToString());
+        Assert.Equal("\"\"", new ExpressionConstant().ToString());
+    }
+
+    [Fact]
+    public void TokenizeExpression_SumRange_BuildsMethodNode()
+    {
+        var expression = new CellExpression();
+
+        expression.TokenizeExpression("SUM(A1:A5)");
+
+        var node = Assert.IsType<ExpressionMethod>(Assert.Single(expression.Nodes));
+        Assert.Equal("SUM(A1:A5)", node.ToString());
+        Assert.Equal(new[] { "A1", "A5" }, expression.ExpressionCells.Select(c => c.ToString()));
+    }
+
+    [Fact]
+    public void TokenizeExpression_OtherFunctions_StillNotImplemented()
+    {
+        Assert.Throws<NotImplementedException>(() => new CellExpression().TokenizeExpression("AVERAGE(A1:A5)"));
+        Assert.Throws<NotImplementedException>(() => new CellExpression().TokenizeExpression("SUM(A1)"));
+    }
 }

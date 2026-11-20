@@ -396,4 +396,63 @@ public sealed class WorkbookBehaviourTests : IDisposable
             Assert.Equal($"w{i}-29", Text(bytes, "A33"));
         }
     }
+
+    // ---- JSON workbook (X-4, X-17)
+
+    private const string JsonWorkbookText = """
+        {
+          "Workbook": {
+            "Sheets": [ { "SheetId": 1, "Name": "First" }, { "SheetId": 2, "Name": "Second" } ],
+            "Worksheet": {
+              "Columns": [ { "Min": 1, "Max": 3, "BestFit": true } ],
+              "SheetData": { "Rows": [
+                { "Collapsed": false, "Cells": [
+                  { "DataType": "String", "CellValue": "Name" },
+                  { "DataType": "Date",   "CellValue": "2020-03-05T00:00:00Z" },
+                  { "DataType": "Number", "CellValue": 12.5 } ] }
+              ] }
+            }
+          },
+          "StyleMap": []
+        }
+        """;
+
+    private static byte[] RenderJson(string json, string culture = "en-US")
+    {
+        using var stream = (MemoryStream)new Engine().Render("", JObject.Parse(json), culture);
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public void JsonWorkbook_TwoSheets_Valid()
+    {
+        var bytes = RenderJson(JsonWorkbookText);
+
+        XlsxGolden.AssertValid(bytes);
+        using var stream = new MemoryStream(bytes);
+        using var document = SpreadsheetDocument.Open(stream, false);
+        Assert.Equal(new[] { "First", "Second" }, document.WorkbookPart!.Workbook.Descendants<Sheet>().Select(s => s.Name!.Value!).ToArray());
+        Assert.Equal(2, document.WorkbookPart.WorksheetParts.Count());
+    }
+
+    [Fact]
+    public void JsonWorkbook_Date_IsASerialNumber_WithAnExistingDateStyle()
+    {
+        var bytes = RenderJson(JsonWorkbookText, "de-DE");
+
+        var date = Cells(bytes)["B1"];
+        Assert.Equal("43895", date.CellValue!.Text);
+        Assert.NotEqual(CellValues.String, date.DataType?.Value);
+        var styleCount = WithWorksheet(bytes, (_, wb) => wb.WorkbookStylesPart!.Stylesheet.CellFormats!.Elements<CellFormat>().Count());
+        Assert.True(date.StyleIndex!.Value < styleCount);
+        Assert.Equal("12.5", Cells(bytes)["C1"].CellValue!.Text);
+    }
+
+    [Fact]
+    public void JsonWorkbook_OneSheet_Valid()
+    {
+        var json = JsonWorkbookText.Replace("[ { \"SheetId\": 1, \"Name\": \"First\" }, { \"SheetId\": 2, \"Name\": \"Second\" } ]", "[ { \"SheetId\": 1, \"Name\": \"Only\" } ]");
+
+        XlsxGolden.AssertValid(RenderJson(json));
+    }
 }
