@@ -234,6 +234,8 @@ public sealed class WorkbookBehaviourTests : IDisposable
         var masters = WithWorksheet(bytes, (ws, _) => ws.Descendants<CellFormula>().Where(f => f.Reference != null).Select(f => f.SharedIndex!.Value).ToList());
         Assert.Equal(masters.Count, masters.Distinct().Count());
         Assert.Equal(2, masters.Count);
+        // the second table moved down by two rows: its formula follows its own row
+        Assert.Equal(new[] { "B4*2", "B11*3" }, WithWorksheet(bytes, (ws, _) => ws.Descendants<CellFormula>().Where(f => f.Reference != null).Select(f => f.Text).ToArray()));
     }
 
     [Fact]

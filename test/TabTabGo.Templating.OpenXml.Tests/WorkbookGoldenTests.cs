@@ -12,8 +12,8 @@ public sealed class WorkbookGoldenTests : IDisposable
 {
     private static readonly string Root = Path.Combine(AppContext.BaseDirectory, "Golden", "Xlsx");
 
-    // v10 requires every workbook to validate; X-4/X-9 fixes complete this.
-    private const bool Validate = false;
+    // v10: every workbook passes the Open XML validator
+    private const bool Validate = true;
 
     private readonly TempDir _dir = new();
 

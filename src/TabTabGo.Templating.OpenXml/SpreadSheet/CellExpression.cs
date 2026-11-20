@@ -1,255 +1,226 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
-/// <summary>
-/// 
-/// </summary>
-namespace TabTabGo.Templating.OpenXml.SpreadSheet
+namespace TabTabGo.Templating.OpenXml.SpreadSheet;
+
+/// <summary>A cell reference inside a formula.</summary>
+/// <seealso cref="ExpressionNode" />
+public class ExpressionCell : ExpressionNode
 {
-
-    /// <summary>
-    /// SpreadSheetCell Range
-    /// </summary>
-    /// <seealso cref="TabTabGo.Templating.OpenXml.SpreadSheet.ExpressionNode" />
-    public class ExpressionCell : ExpressionNode
+    /// <summary>Creates an empty reference.</summary>
+    public ExpressionCell()
     {
-        public string ColumnIndex { get; set; }
-        public int RowIndex { get; set; }
-
-        public ExpressionCell()
-        {
-            base.ExpressionType = ExpressionType.Cell;
-        }
-
-        public ExpressionCell(string range) : this()
-        {
-            this.ColumnIndex = Utility.GetColumnName(range);
-            this.RowIndex = Utility.GetRowIndex(range);
-        }
-        public override string ToString()
-        {
-            return ColumnIndex + RowIndex;
-        }
-
-
+        ExpressionType = ExpressionType.Cell;
     }
 
-    /// <summary>
-    /// Basic Node for SpreadSheet Formula
-    /// </summary>
-    public class ExpressionNode
+    /// <summary>Creates a reference from <c>A1</c>-style text.</summary>
+    /// <param name="range">The cell reference.</param>
+    public ExpressionCell(string range)
+        : this()
     {
-        public ExpressionType ExpressionType { get; set; }
+        ColumnIndex = Utility.GetColumnName(range);
+        RowIndex = Utility.GetRowIndex(range);
+    }
 
-        public override string ToString()
+    /// <summary>The column letters.</summary>
+    public string ColumnIndex { get; set; } = string.Empty;
+
+    /// <summary>The row number.</summary>
+    public int RowIndex { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString() => ColumnIndex + RowIndex;
+}
+
+/// <summary>Basic node of a spreadsheet formula.</summary>
+public class ExpressionNode
+{
+    /// <summary>The kind of node.</summary>
+    public ExpressionType ExpressionType { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString() => string.Empty;
+}
+
+/// <summary>A constant text value.</summary>
+/// <seealso cref="ExpressionNode" />
+public class ExpressionConstant : ExpressionNode
+{
+    /// <summary>Creates a constant node.</summary>
+    public ExpressionConstant()
+    {
+        ExpressionType = ExpressionType.Constant;
+    }
+
+    /// <summary>The text.</summary>
+    public string? Value { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString() => "\"" + (Value ?? string.Empty) + "\"";
+}
+
+/// <summary>A formula between parentheses.</summary>
+/// <seealso cref="ExpressionNode" />
+public class ExpressionGroup : ExpressionNode
+{
+    /// <summary>Creates a group node.</summary>
+    public ExpressionGroup()
+    {
+        ExpressionType = ExpressionType.Group;
+    }
+
+    /// <summary>The inner formula.</summary>
+    public ExpressionNode? Expression { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString() => "(" + (Expression?.ToString() ?? string.Empty) + ")";
+}
+
+/// <summary>A binary expression: left node, operation, right node.</summary>
+/// <seealso cref="ExpressionNode" />
+public class BinaryOperation : ExpressionNode
+{
+    /// <summary>Creates a binary node.</summary>
+    public BinaryOperation()
+    {
+        ExpressionType = ExpressionType.Binary;
+    }
+
+    /// <summary>The operator, for example <c>+</c>.</summary>
+    public string? Operation { get; set; }
+
+    /// <summary>The left operand.</summary>
+    public ExpressionNode? Left { get; set; }
+
+    /// <summary>The right operand.</summary>
+    public ExpressionNode? Right { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString()
+    {
+        if (string.IsNullOrEmpty(Operation) || (Right == null && Left == null))
         {
             return string.Empty;
         }
+
+        if (Operation == "-" && Left == null && Right != null)
+        {
+            return Operation + Right;
+        }
+
+        if (Operation == "-" && Left != null && Right == null)
+        {
+            return Operation + Left;
+        }
+
+        return Left == null || Right == null ? string.Empty : Left + Operation + Right;
+    }
+}
+
+/// <summary>A function call.</summary>
+/// <seealso cref="ExpressionNode" />
+public class ExpressionMethod : ExpressionNode
+{
+    /// <summary>Creates a method node.</summary>
+    public ExpressionMethod()
+    {
+        ExpressionType = ExpressionType.Method;
     }
 
-    /// <summary>
-    /// Constant Node "string" value
-    /// </summary>
-    /// <seealso cref="TabTabGo.Templating.OpenXml.SpreadSheet.ExpressionNode" />
-    public class ExpressionConstant : ExpressionNode
+    /// <summary>The arguments.</summary>
+    public List<ExpressionNode> Parameters { get; set; } = new();
+
+    /// <summary>The function name.</summary>
+    public string? Method { get; set; }
+
+    /// <inheritdoc />
+    public override string ToString()
     {
-        public ExpressionConstant()
+        if (string.IsNullOrEmpty(Method))
         {
-            base.ExpressionType = ExpressionType.Constant;
+            return string.Empty;
         }
 
-        public string Value { get; set; }
-
-        public override string ToString()
+        if (Method.Equals("SUM", StringComparison.OrdinalIgnoreCase) && Parameters.Count == 2)
         {
-            return "\"" + Value ?? string.Empty + "\"";
+            return $"{Method}({Parameters[0]}:{Parameters[1]})";
         }
+
+        var builder = new StringBuilder(Method + "(");
+        builder.Append(string.Join(",", Parameters.Select(parameter => parameter.ToString())));
+        return builder.Append(')').ToString();
     }
+}
 
-    /// <summary>
-    /// Formula between ( )
-    /// </summary>
-    /// <seealso cref="TabTabGo.Templating.OpenXml.SpreadSheet.ExpressionNode" />
-    public class ExpressionGroup : ExpressionNode
+/// <summary>The kinds of formula node.</summary>
+public enum ExpressionType
+{
+    /// <summary>No kind.</summary>
+    None,
+
+    /// <summary>A constant.</summary>
+    Constant,
+
+    /// <summary>A binary operation.</summary>
+    Binary,
+
+    /// <summary>A function call.</summary>
+    Method,
+
+    /// <summary>A cell reference.</summary>
+    Cell,
+
+    /// <summary>A parenthesised group.</summary>
+    Group,
+}
+
+/// <summary>Parses the simple formulas the engine understands (<c>A1+B1</c> and <c>SUM(A1:A5)</c>).</summary>
+public class CellExpression
+{
+    private static readonly Regex Tokens = new(@"([\+\-\*\(\)\^\/\ ])", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+    private static readonly Regex SumRange = new(@"^SUM\(\s*([A-Za-z]+\d+)\s*:\s*([A-Za-z]+\d+)\s*\)$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+
+    /// <summary>The cell references found in the formula.</summary>
+    public List<ExpressionCell> ExpressionCells { get; set; } = new();
+
+    /// <summary>The parsed nodes.</summary>
+    public Queue<ExpressionNode> Nodes { get; set; } = new();
+
+    /// <summary>Parses a formula into nodes. Supported: <c>A1+B2</c> (one binary operation between two cells) and <c>SUM(A1:A5)</c>.</summary>
+    /// <param name="expression">The formula text without <c>=</c>.</param>
+    /// <exception cref="NotImplementedException">The formula is more complex than the supported shapes.</exception>
+    public void TokenizeExpression(string expression)
     {
-        public ExpressionGroup()
+        ArgumentNullException.ThrowIfNull(expression);
+
+        // the function shape first: the generic tokenizer would split SUM(A1:A5) at its parentheses
+        var sum = SumRange.Match(expression.Trim());
+        if (sum.Success)
         {
-            base.ExpressionType = ExpressionType.Group;
+            var method = new ExpressionMethod
+            {
+                Method = "SUM",
+                Parameters = new List<ExpressionNode> { new ExpressionCell(sum.Groups[1].Value), new ExpressionCell(sum.Groups[2].Value) },
+            };
+            ExpressionCells.AddRange(method.Parameters.Cast<ExpressionCell>());
+            Nodes = new Queue<ExpressionNode>(new ExpressionNode[] { method });
+            return;
         }
 
-        public ExpressionNode Expression { get; set; }
-
-        public override string ToString()
+        var tokens = Tokens.Split(expression).Select(token => token.Trim()).Where(token => token != string.Empty).ToList();
+        if (tokens.Count != 3)
         {
-            return "(" + (Expression?.ToString() ?? string.Empty) + ")";
-        }
-    }
-
-    /// <summary>
-    /// Binary Expression where formule = [Left Node] [operation] [Right Node]
-    /// </summary>
-    /// <seealso cref="TabTabGo.Templating.OpenXml.SpreadSheet.ExpressionNode" />
-    public class BinaryOperation : ExpressionNode
-    {
-        public BinaryOperation()
-        {
-            base.ExpressionType = ExpressionType.Binary;
-        }
-        public string Operation { get; set; }
-        public ExpressionNode Left { get; set; }
-        public ExpressionNode Right { get; set; }
-
-        public override string ToString()
-        {
-            if (string.IsNullOrEmpty(Operation)) return string.Empty;
-            if (Right == null && Left == null) return string.Empty;
-
-            if (Operation == "-" && Left == null && Right != null)
-            {
-                return Operation + Right.ToString();
-            }
-            else if (Operation == "-" && Left != null && Right == null)
-            {
-                return Operation + Left.ToString();
-            }
-            else if (Left == null || Right == null)
-            {
-                return string.Empty;
-            }
-            else
-                return Left.ToString() + Operation + Right.ToString();
-        }
-    }
-
-    /// <summary>
-    /// Formula use Method
-    /// </summary>
-    /// <seealso cref="TabTabGo.Templating.OpenXml.SpreadSheet.ExpressionNode" />
-    public class ExpressionMethod : ExpressionNode
-    {
-        public ExpressionMethod()
-        {
-            base.ExpressionType = ExpressionType.Method;
-        }
-        public List<ExpressionNode> Parameters { get; set; } = new List<ExpressionNode>();
-        public string Method { get; set; }
-
-        public override string ToString()
-        {
-            if (string.IsNullOrEmpty(Method)) return string.Empty;
-            if (Method.ToUpper() == "SUM" && Parameters.Count == 2)
-            {
-                return $"{Method}({Parameters[0]}:{Parameters[1]})";
-            }
-            else
-            {
-                var methodBuilder = new StringBuilder(Method + "(");
-                var parametersAdded = false;
-                foreach (var parameter in Parameters)
-                {
-                    methodBuilder.Append(parameter.ToString() + ",");
-                    parametersAdded = true;
-                }
-                if (parametersAdded)
-                {
-                    methodBuilder.Remove(methodBuilder.Length - 1, 1);
-                }
-
-                methodBuilder.Append(")");
-                return methodBuilder.ToString();
-            }
-        }
-    }
-
-    public enum ExpressionType
-    {
-        None,
-        Constant,
-        Binary,
-        Method,
-        Cell,
-        Group
-    }
-    public class CellExpression
-    {
-        public List<ExpressionCell> ExpressionCells { get; set; } = new List<ExpressionCell>();
-        public Queue<ExpressionNode> Nodes { get; set; } = new Queue<ExpressionNode>();
-        /// <summary>
-        /// Converts a standard infix expression to list of tokens in
-        /// postfix order.
-        /// TODO implement Shunting-yard algorithm or Operator-precedence parser  
-        /// </summary>
-        /// <param name="expression">Expression to evaluate</param>
-        /// <returns></returns>
-        public void TokenizeExpression(string expression)
-        {
-            var queue = new Queue<ExpressionNode>();
-            Regex re = new Regex(@"([\+\-\*\(\)\^\/\ ])");
-            List<string> tokens = re.Split(expression).Select(t => t.Trim()).Where(t => t != "").ToList();
-
-            // var tokens = expression.Split('-', '+', '*', '/').ToList();
-            if (tokens.Count == 3)
-            {
-                int index = 0;
-                var operationExpression = new BinaryOperation()
-                {
-                    Left = new ExpressionCell(tokens[index++]),
-                    Operation = tokens[index++],
-                    Right = new ExpressionCell(tokens[index++])
-                };
-                ExpressionCells.Add((ExpressionCell)operationExpression.Left);
-                ExpressionCells.Add((ExpressionCell)operationExpression.Right);
-                queue.Enqueue(operationExpression);
-            }
-            else if (tokens.Count == 0)
-            {
-                if (expression.StartsWith("SUM"))
-                {
-                    tokens = expression.Split('(', ')', ':').ToList();
-                    var method = new ExpressionMethod()
-                    {
-                        Method = tokens[0],
-                        Parameters = new List<ExpressionNode>()
-                        {
-                            new ExpressionCell(tokens[2]),
-                            new ExpressionCell(tokens[4])
-                        }
-                    };
-                    ExpressionCells.AddRange(method.Parameters.Cast<ExpressionCell>());
-                    queue.Enqueue(method);
-                }
-                else
-                {
-                    throw new NotImplementedException("Advance fourmla is not implemnted for now");
-                }
-
-            }
-            else
-            {
-                throw new NotImplementedException("Advance fourmla is not implemnted for now");
-            }
-
-
-            //Stack<ExpressionNode> stack = new Stack<ExpressionNode>();
-            //Regex re = new Regex(@"([\+\-\*\(\)\^\/\ ])");
-            //var tokenList = re.Split(expression).Select(t => t.Trim()).Where(t => t != "").ToList();
-            //var currentType = ExpressionType.None;
-            //foreach (var token in tokenList)
-            //{
-            //    if (token == "(" && currentType != ExpressionType.Method)
-            //    {
-            //        currentType = ExpressionType.Group;
-            //        stack.Push(new );
-            //    }
-            //}
-
-
-            this.Nodes = queue;
+            throw new NotImplementedException("Advanced formulas are not implemented: only 'A1+B2' and 'SUM(A1:A5)' are supported.");
         }
 
-
+        var operation = new BinaryOperation
+        {
+            Left = new ExpressionCell(tokens[0]),
+            Operation = tokens[1],
+            Right = new ExpressionCell(tokens[2]),
+        };
+        ExpressionCells.Add((ExpressionCell)operation.Left);
+        ExpressionCells.Add((ExpressionCell)operation.Right);
+        Nodes = new Queue<ExpressionNode>(new ExpressionNode[] { operation });
     }
 }

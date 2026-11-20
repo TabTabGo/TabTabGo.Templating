@@ -1,0 +1,1 @@
+<x:table displayName="Items" id="1" name="Items" ref="A3:C6" totalsRowShown="0" xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:tableColumns count="3"><x:tableColumn id="1" name="Item" /><x:tableColumn id="2" name="Qty" /><x:tableColumn id="3" name="Total" /></x:tableColumns></x:table>
