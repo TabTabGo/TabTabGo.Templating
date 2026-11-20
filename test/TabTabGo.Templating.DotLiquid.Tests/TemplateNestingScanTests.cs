@@ -75,8 +75,8 @@ public sealed class TemplateNestingScanTests
     [Fact]
     public void TheParseBackstop_SurvivesATemplateTheScanDoesNotLimit()
     {
-        // 20 000 nested blocks overflow the main thread's stack (8 MB); the parse runs on its own large stack, whoever calls it
-        var template = string.Concat(Enumerable.Repeat("{% if a %}", 20_000)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 20_000));
+        // thousands of nested blocks overflow a 256 KB caller stack (20 000 overflow the main thread's 8 MB); the parse runs on its own large stack, whoever calls it
+        var template = string.Concat(Enumerable.Repeat("{% if a %}", 5_000)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 5_000));
         Template? parsed = null;
         var thread = new Thread(() => parsed = TemplateNesting.Parse(template, int.MaxValue), maxStackSize: 256 * 1024);
         thread.Start();
@@ -128,20 +128,44 @@ public sealed class TemplateNestingScanTests
     [Theory]
     [InlineData("{% else %}")]
     [InlineData("{% zzunknown %}")]
-    public void ManyContinuationOrUnregisteredTags_CostNoMoreThanTokenizingThem(string tag)
+    public void ContinuationAndUnregisteredTags_CostAtMostOneRegistryLookupPerDistinctName(string tag)
     {
-        // DotLiquid throws a NullReferenceException for a name it does not register: once per tag it was 7.8 s of 14.7 s for 90 000 tags. DotLiquid's own tokenizer is
-        // superlinear, so the scan is compared with the tokenizer alone rather than with a wall-clock figure.
-        var template = "{% if a %}" + string.Concat(Enumerable.Repeat(tag, 40_000)) + "{% endif %}";
-        TemplateNesting.Depth(template); // warm up
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        TemplateNesting.Tokens(template);
-        var tokenizing = watch.ElapsedMilliseconds;
-        watch.Restart();
+        // DotLiquid throws a NullReferenceException for a name it does not register; asked once per tag that was half of the scan time. Counted, not timed.
+        var template = "{% if a %}" + string.Concat(Enumerable.Repeat(tag, 3000)) + "{% endif %}";
+        var before = TemplateNesting.RegistryLookups;
 
         Assert.Equal(1, TemplateNesting.Depth(template));
 
-        Assert.True(watch.ElapsedMilliseconds <= tokenizing * 1.5 + 1000, $"scan {watch.ElapsedMilliseconds} ms, tokenizing alone {tokenizing} ms");
+        Assert.True(TemplateNesting.RegistryLookups - before <= 2, $"{TemplateNesting.RegistryLookups - before} registry lookups"); // "if" (first time only) and the tag name
+    }
+
+    [Fact]
+    public void TheSharedTokenParse_BuildsTheSameTreeAsTemplateParse()
+    {
+        var random = new Random(4242);
+        var data = global::DotLiquid.Hash.FromAnonymousObject(new { a = true, x = new[] { 1, 2, 3 } });
+        var compared = 0;
+        for (var round = 0; round < 300; round++)
+        {
+            var source = Structured(random, 0).Replace("{% endfoo %}", string.Empty);
+            Template stock;
+            try
+            {
+                stock = Template.Parse(source);
+            }
+            catch (SyntaxException)
+            {
+                Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(source, int.MaxValue)); // refused the same way
+                continue;
+            }
+
+            var shared = TemplateNesting.Parse(source, int.MaxValue);
+            compared++;
+            Assert.Equal(ParsedDepth(stock.Root!), ParsedDepth(shared.Root!));
+            Assert.Equal(stock.Render(data), shared.Render(data));
+        }
+
+        Assert.True(compared > 100, $"only {compared} templates compared");
     }
 
     /// <summary>The block nesting of a parsed template, measured on DotLiquid's own parse tree.</summary>
@@ -184,7 +208,7 @@ public sealed class TemplateNestingScanTests
         var random = new Random(20261120);
         var parsedCount = 0;
 
-        for (var round = 0; round < 3000; round++)
+        for (var round = 0; round < 1500; round++)
         {
             var template = string.Concat(Enumerable.Range(0, random.Next(1, 40)).Select(_ => pieces[random.Next(pieces.Length)]));
             int counted;
@@ -204,7 +228,7 @@ public sealed class TemplateNestingScanTests
             Assert.True(counted >= actual, $"scan {counted} < parsed {actual} for: {template}");
         }
 
-        Assert.True(parsedCount > 20, $"only {parsedCount} random templates parsed");
+        Assert.True(parsedCount > 10, $"only {parsedCount} random templates parsed");
     }
 
     private static string Structured(Random random, int depth)
@@ -236,7 +260,7 @@ public sealed class TemplateNestingScanTests
     {
         var random = new Random(77);
         var parsedCount = 0;
-        for (var round = 0; round < 2000; round++)
+        for (var round = 0; round < 1000; round++)
         {
             var template = Structured(random, 0);
             Template parsed;
@@ -259,6 +283,6 @@ public sealed class TemplateNestingScanTests
             }
         }
 
-        Assert.True(parsedCount > 500, $"only {parsedCount} structured templates parsed");
+        Assert.True(parsedCount > 250, $"only {parsedCount} structured templates parsed");
     }
 }

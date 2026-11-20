@@ -45,7 +45,7 @@ DotLiquid falls back to a file system the host assigned to `Template.FileSystem`
 
 ## Limits
 
-Parsing happens before `RenderTimeout` starts (about 6 s per 1 000 000 characters of template; `MaxTemplateCharacters` caps a `RenderString` template at 1 000 000, files are trusted).
+Parsing happens before `RenderTimeout` starts. DotLiquid's tokenizer is superlinear in the template size, so the cost grows faster than the size: measured on the final code, 100 000 characters parse in 0.1-0.4 s, 250 000 in 1-2 s, 500 000 in 2.5-4.7 s and 1 000 000 in 6-18 s of CPU (the scan and the parser share one token list, so the engine costs the same as `Template.Parse` itself; `MaxTemplateCharacters` caps a `RenderString` template at 1 000 000, files are trusted).
 `MaxNestingDepth` (100) refuses a template that nests blocks deeper, by a linear scan before parsing: DotLiquid's parser recurses once per level, and a few thousand nested
 `{% if %}` tags overflow the stack and end the process (this was also true of 8.0.x and stock DotLiquid). The scan runs over DotLiquid's own tokens (so `{{ ... }}` output text and `{%-` tags split as the parser splits them), finds block tags through the registered tag types (custom blocks
 count), lowers the depth only for an end tag that closes the innermost open block, and skips `raw` and `comment` bodies (the tokenizer returns each as one text token). As a backstop the
@@ -53,6 +53,8 @@ parse itself runs on a thread with a 256 MB stack (reserved, committed only as u
 Two limits of the backstop: a host with strict memory overcommit (`vm.overcommit_memory=2`) may fail to start the 256 MB-stack thread, and it is not sized for `MaxTemplateCharacters` 0 or
 very large template files (about 110 000 nested blocks per 1 000 000 characters); the scan still applies in both cases. The scan binds to DotLiquid's internal tokenizer, so the package
 depends on DotLiquid `[2.3.260, 2.4.0)`; a bump goes through the architect and the nesting fuzz tests. A refused template throws `DotLiquid.Exceptions.SyntaxException`.
+
+**`ParseTimeout` only reaches regular expressions DotLiquid creates after the engine has been created** (DotLiquid builds some parse expressions once, at first use, with the process-wide value current then). A host that calls `DotLiquid.Template.Parse` before it creates a `TemplatingEngine` keeps DotLiquid's 10 s default for those expressions (with `ParseTimeout` of 1 ms, a 700 000-character template still rendered in 279 ms instead of timing out). Create the engine before any other DotLiquid use.
 
 **Hosts that render untrusted templates** should lower `RenderTimeout`, cap the number of concurrent renders and set `MaxTemplateCharacters` to what they need: one adversarial
 render can hold one CPU core for up to `RenderTimeout` and produce about 100 MB of output (twice `MaxOutputCharacters` in the worst case of output plus one growing string).

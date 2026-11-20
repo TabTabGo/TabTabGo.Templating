@@ -34,7 +34,14 @@ internal static class TemplateNesting
     /// <exception cref="SyntaxException">The template nests blocks too deeply, or DotLiquid rejects its syntax.</exception>
     public static Template Parse(string template, int maxDepth)
     {
-        Check(template, maxDepth);
+        // DotLiquid has no public overload for pre-tokenized input (its Template constructor is internal too), but Template.Parse is exactly: new Template(), Root = new Document(), Root.Initialize(null, null, tokens)
+        // over Tokenizer.Tokenize(source, level). Doing those steps here lets the scan and the parser share one token list (the tokenizer is superlinear, so a second
+        // pass doubled the parse cost). The tests compare the resulting tree with Template.Parse.
+        var tokens = Tokens(template);
+        if (Depth(tokens, maxDepth) > maxDepth)
+        {
+            throw new SyntaxException($"The template nests blocks deeper than {maxDepth} levels (TemplatingOptions.MaxNestingDepth).");
+        }
 
         Template? parsed = null;
         Exception? failure = null;
@@ -43,7 +50,10 @@ internal static class TemplateNesting
             {
                 try
                 {
-                    parsed = Template.Parse(template);
+                    var result = (Template)Activator.CreateInstance(typeof(Template), nonPublic: true)!; // the constructor is internal
+                    result.Root = new Document();
+                    result.Root.Initialize(null, null, tokens); // consumes the list
+                    parsed = result;
                 }
                 catch (Exception ex)
                 {
@@ -79,9 +89,13 @@ internal static class TemplateNesting
     /// </summary>
     /// <param name="template">The template text.</param>
     /// <param name="stopAfter">Depth at which to stop counting.</param>
-    internal static int Depth(string template, int stopAfter = int.MaxValue)
+    internal static int Depth(string template, int stopAfter = int.MaxValue) => Depth(Tokens(template), stopAfter);
+
+    /// <summary>The scan over tokens already produced by <see cref="Tokens"/>.</summary>
+    /// <param name="tokens">The tokens.</param>
+    /// <param name="stopAfter">Depth at which to stop counting.</param>
+    internal static int Depth(List<string> tokens, int stopAfter)
     {
-        var tokens = Tokens(template);
         var open = new Stack<string>();
         var notBlocks = new HashSet<string>(StringComparer.Ordinal); // per scan: an unregistered name is looked up once
         var deepest = 0;
@@ -145,7 +159,12 @@ internal static class TemplateNesting
     }
 
     /// <summary>The tokens <c>Template.Parse</c> would parse (its cost, superlinear in the token count, is DotLiquid's own).</summary>
-    internal static List<string> Tokens(string template) => Tokenize(DotLiquid.Tags.Comment.FromShortHand(template), Template.DefaultSyntaxCompatibilityLevel);
+    internal static List<string> Tokens(string template) => Tokenize(template, Template.DefaultSyntaxCompatibilityLevel);
+
+    /// <summary>Calls made to DotLiquid's tag registry by the scan (tests assert it stays at one per distinct name).</summary>
+    internal static long RegistryLookups => Interlocked.Read(ref _registryLookups);
+
+    private static long _registryLookups;
 
     private static bool IsBlock(string name, HashSet<string> notBlocks)
     {
@@ -162,6 +181,7 @@ internal static class TemplateNesting
         Type? type;
         try
         {
+            Interlocked.Increment(ref _registryLookups);
             type = Template.GetTagType(name);
         }
         catch (NullReferenceException)
