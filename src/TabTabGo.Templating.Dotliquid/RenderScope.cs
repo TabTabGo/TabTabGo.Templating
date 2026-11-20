@@ -16,8 +16,9 @@ namespace TabTabGo.Templating.Liquid
 
         private readonly RenderScope? _previous;
 
-        private RenderScope(TemplatingOptions options, IFileSystem? fileSystem, RenderScope? previous)
+        private RenderScope(TemplatingOptions options, IFileSystem? fileSystem, RenderScope? previous, CancellationToken cancellation)
         {
+            Cancellation = cancellation;
             Options = options;
             FileSystem = fileSystem;
             _previous = previous;
@@ -32,13 +33,16 @@ namespace TabTabGo.Templating.Liquid
         /// <summary>The options of this render.</summary>
         public TemplatingOptions Options { get; }
 
+        /// <summary>Cancelled when the render time-out passes; long loops in filters observe it.</summary>
+        public CancellationToken Cancellation { get; }
+
         /// <summary>The file system of the template being rendered (its includes resolve against it).</summary>
         public IFileSystem? FileSystem { get; }
 
         /// <summary>Opens a scope; dispose it when the render ends.</summary>
-        public static RenderScope Begin(TemplatingOptions options, IFileSystem? fileSystem)
+        public static RenderScope Begin(TemplatingOptions options, IFileSystem? fileSystem, CancellationToken cancellation = default)
         {
-            var scope = new RenderScope(options, fileSystem, CurrentScope.Value);
+            var scope = new RenderScope(options, fileSystem, CurrentScope.Value, cancellation);
             CurrentScope.Value = scope;
             return scope;
         }

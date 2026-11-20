@@ -134,4 +134,101 @@ public sealed class RenderGrowthTests
         Assert.Equal("0123456789", engine.RenderString("0123456789", new { }));
         Assert.Equal("0123456789", engine.RenderString("0123456789", new { }));
     }
+
+    // ---- review round: expansion is estimated before it is allocated; item counts and repeat counts are capped; loops observe the time-out
+
+    [Fact]
+    public void Replace_SubstitutionAmplification_IsRejectedBeforeItIsAllocated()
+    {
+        var input = new string('a', 100_000);
+        var engine = Engine(500_000);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Throws<RenderLimitExceededException>(() =>
+            engine.RenderString("{% assign s = input | Replace: 'a', '$_$_$_$_$_$_$_$_$_$_' %}x", new { input }));
+
+        // one expansion of 10 x 100 000 characters would allocate about 2 MB on its own
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < 1_000_000);
+    }
+
+    [Fact]
+    public void Replace_LiteralReplacementAmplification_IsRejectedBeforeItIsAllocated()
+    {
+        var big = new string('b', 400_000);
+        var engine = Engine(500_000);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Throws<RenderLimitExceededException>(() =>
+            engine.RenderString("{% assign s = 'aaa' | Replace: 'a', big %}x", new { big }));
+
+        Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < 2_500_000); // the data itself is 800 kB; three copies would be 2.4 MB more
+    }
+
+    [Fact]
+    public void Replace_DollarTokens_StillExpandWithinTheLimit()
+    {
+        Assert.Equal("[b][b]", Engine(1000).RenderString("{{ 'bb' | Replace: '(b)', '[$1]' }}", new { }));
+        Assert.Equal("price $5", Engine(1000).RenderString("{{ 'price 5' | Replace: ' ', ' $$' }}", new { }));
+        Assert.Equal("xx", Engine(1000).RenderString("{{ 'ab' | Replace: 'a', 'x$&' | Replace: 'b', '' | Replace: 'xa', 'xx' }}", new { }));
+    }
+
+    [Fact]
+    public void Join_TooManyItems_IsBounded_EvenWhenEveryItemIsEmpty()
+    {
+        var items = Enumerable.Repeat(string.Empty, 200).ToList();
+
+        AssertExceeds(100, "{{ items | Join: '' }}", new { items });
+    }
+
+    [Fact]
+    public void Times_HugeRepeatCount_IsRejected_EvenForAnEmptyString()
+    {
+        AssertExceeds(100, "{% assign s = '' | Times: 1000 %}x");
+        AssertExceeds(0 + 100, "{% assign s = '' | Times: 3000000000 %}x");
+        // unlimited output still refuses a count no string can hold
+        Assert.Throws<RenderLimitExceededException>(() => Engine(0).RenderString("{% assign s = '' | Times: 3000000000 %}x", new { }));
+    }
+
+    [Fact]
+    public void Join_Replace_Concat_ObserveTheRenderTimeout()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        using var scope = TabTabGo.Templating.Liquid.RenderScope.Begin(new TemplatingOptions { MaxOutputCharacters = 0 }, null, cts.Token);
+        var lazy = Enumerable.Repeat("x", 1_000_000);
+
+        Assert.Throws<RenderLimitExceededException>(() => TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.Join(lazy, ","));
+        Assert.Throws<RenderLimitExceededException>(() => TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.Concat(lazy, lazy));
+        Assert.Throws<RenderLimitExceededException>(() =>
+            TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.Replace(new global::DotLiquid.Context(System.Globalization.CultureInfo.InvariantCulture), new string('a', 100_000), "a", "b"));
+    }
+
+    [Theory]
+    [InlineData("Append")]
+    [InlineData("Prepend")]
+    [InlineData("Join")]
+    [InlineData("Replace")]
+    [InlineData("ReplaceFirst")]
+    [InlineData("Plus")]
+    [InlineData("Times")]
+    [InlineData("Concat")]
+    public void EveryGuardedFilter_ThrowsPastTheLimit_AndOnlyBecauseOfTheLimit(string filter)
+    {
+        var data = new { s = new string('x', 60), list = new[] { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l" } };
+        var template = filter switch
+        {
+            "Append" => "{% assign r = s | Append: s %}",
+            "Prepend" => "{% assign r = s | Prepend: s %}",
+            "Join" => "{% assign r = list | Join: s %}",
+            "Replace" => "{% assign r = s | Replace: 'x', 'yy' %}",
+            "ReplaceFirst" => "{% assign r = s | ReplaceFirst: 'x', s %}",
+            "Plus" => "{% assign r = s | Plus: s %}",
+            "Times" => "{% assign r = s | Times: 3 %}",
+            _ => "{% assign r = list | Concat: list %}{% assign r = r | Concat: r %}{% assign r = r | Concat: r %}{% assign r = r | Concat: r %}{% assign r = r | Concat: r %}{% assign r = r | Concat: r %}",
+        };
+
+        AssertExceeds(100, template, data);                       // past the limit: throws
+        Assert.Equal(string.Empty, Engine(100_000).RenderString(template, data)); // same template, roomy limit: renders (assign only prints nothing)
+        Assert.Equal(string.Empty, Engine(0).RenderString(template, data));       // limit 0 = unlimited
+    }
 }

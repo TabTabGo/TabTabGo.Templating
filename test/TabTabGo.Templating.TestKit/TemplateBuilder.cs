@@ -13,6 +13,7 @@ public sealed class TemplateBuilder
     private readonly List<SheetSpec> _sheets = new();
     private bool _omitSharedStrings;
     private bool _omitCalculationProperties;
+    private bool _omitDimension;
 
     private TemplateBuilder()
     {
@@ -90,6 +91,21 @@ public sealed class TemplateBuilder
         return this;
     }
 
+    /// <summary>Leaves the sheet dimension element out.</summary>
+    public TemplateBuilder WithoutDimension()
+    {
+        _omitDimension = true;
+        return this;
+    }
+
+    /// <summary>Puts a cell typed as shared string but without a value (as some writers produce).</summary>
+    /// <param name="cell">A1-style reference.</param>
+    public TemplateBuilder EmptySharedStringCell(string cell)
+    {
+        Current.Cells[cell] = new CellSpec(CellKind.EmptyShared, string.Empty);
+        return this;
+    }
+
     /// <summary>Leaves the workbook calculation properties out.</summary>
     public TemplateBuilder WithoutCalculationProperties()
     {
@@ -126,7 +142,11 @@ public sealed class TemplateBuilder
                 }
 
                 var worksheet = new Worksheet();
-                worksheet.Append(new SheetDimension { Reference = Dimension(spec) });
+                if (!_omitDimension)
+                {
+                    worksheet.Append(new SheetDimension { Reference = Dimension(spec) });
+                }
+
                 worksheet.Append(sheetData);
                 if (spec.Merges.Count > 0)
                 {
@@ -220,6 +240,9 @@ public sealed class TemplateBuilder
                 cell.DataType = CellValues.InlineString;
                 cell.InlineString = new InlineString { Text = new Text(spec.Value) };
                 break;
+            case CellKind.EmptyShared:
+                cell.DataType = CellValues.SharedString;
+                break;
             case CellKind.Number:
                 cell.CellValue = new CellValue(spec.Value);
                 break;
@@ -308,6 +331,7 @@ public sealed class TemplateBuilder
         Inline,
         Number,
         Formula,
+        EmptyShared,
     }
 
     private sealed record CellSpec(CellKind Kind, string Value);
