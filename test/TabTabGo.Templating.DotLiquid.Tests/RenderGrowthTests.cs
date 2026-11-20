@@ -243,4 +243,41 @@ public sealed class RenderGrowthTests
         Assert.Throws<RenderLimitExceededException>(() =>
             TabTabGo.Templating.Liquid.Filters.GuardedStringFilters.ReplaceFirst(Literal(), "abc", "a", new string('z', 101)));
     }
+
+    // ---- the expansion bound never undercounts: tokens that do not resolve are emitted literally
+
+    [Theory]
+    [InlineData("${xxxxxxxxxx", 100)]          // unterminated "${": the whole rest is literal, 12 characters per match
+    [InlineData("$9$9$9$9$9", 80)]             // group 9 does not exist: "$9" stays literal
+    [InlineData("${nope}${nope}", 100)]        // group name does not exist: "${nope}" stays literal
+    [InlineData("$99$99$99$99", 90)]           // two-digit group that does not exist
+    [InlineData("$&$&$&$&$&$&$&$&$&$&", 90)]   // many repeated tokens, each resolving to the match
+    public void Replace_TokensThatDoNotResolve_AreCountedAsEmitted(string replacement, int limit)
+    {
+        // ten matches: the literal expansion is longer than the limit on the last match, so only a final check (or an exact bound) sees it
+        var input = new string('a', 10);
+
+        AssertExceeds(limit, "{% assign s = input | Replace: 'a', replacement %}x", new { input, replacement });
+    }
+
+    [Fact]
+    public void Replace_ResultJustBelowTheLimit_Renders()
+    {
+        Assert.Equal(new string('b', 10), Engine(10).RenderString("{{ 'aaaaaaaaaa' | Replace: 'a', 'b' }}", new { }));
+        Assert.Equal("$9$9", Engine(10).RenderString("{{ 'aa' | Replace: 'a', '$9' }}", new { }));
+    }
+
+    [Fact]
+    public void RenderBudget_ExpansionBound_NeverUndercountsWhatMatchResultProduces()
+    {
+        var matcher = new System.Text.RegularExpressions.Regex("(b)(?<n>c)?");
+        var replacements = new[] { "${", "${x", "$9", "$99", "${nope}", "$1$2", "${n}$n", "$&$`$'$_", "$$", "$+", "$", "x$", "$z", "${1}", "${"};
+        foreach (var replacement in replacements)
+        {
+            var match = matcher.Match("abcd");
+            var produced = match.Result(replacement).Length;
+            var bound = TabTabGo.Templating.Liquid.Internal.RenderBudget.ExpansionBound(replacement, match.Length, "abcd".Length);
+            Assert.True(bound >= produced, $"'{replacement}': bound {bound} < produced {produced}");
+        }
+    }
 }

@@ -190,7 +190,8 @@ public static class GuardedStringFilters
             }
         }
 
-        builder.Append(input, last, input.Length - last); // within the budget: every append above was checked together with the tail
+        builder.Append(input, last, input.Length - last);
+        RenderBudget.Check(builder.Length); // defence in depth: the pre-checks above are estimates
         return builder.ToString();
     }
 

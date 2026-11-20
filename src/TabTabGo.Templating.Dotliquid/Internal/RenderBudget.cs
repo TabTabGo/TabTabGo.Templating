@@ -47,8 +47,9 @@ internal static class RenderBudget
     }
 
     /// <summary>
-    /// An upper bound of the length <c>Match.Result</c> produces for <paramref name="replacement"/>: literal characters count one, a
-    /// group or whole-match token at most the match, and the prefix, suffix and whole-input tokens at most the input.
+    /// An upper bound of the length <c>Match.Result</c> produces for <paramref name="replacement"/>. Literal characters count one; a token counts
+    /// the larger of what it can resolve to (the match, or the input for the prefix, suffix and whole-input tokens) and its own text, because a
+    /// token that does not resolve (an unterminated <c>${</c>, a group that does not exist) is emitted literally.
     /// </summary>
     public static long ExpansionBound(string replacement, int matchLength, int inputLength)
     {
@@ -69,22 +70,30 @@ internal static class RenderBudget
             }
             else if (next is '`' or '\'' or '_')
             {
-                total += inputLength;
+                total += Math.Max(inputLength, 2);
                 i++;
             }
-            else if (next is '&' or '+' || char.IsDigit(next))
+            else if (next is '&' or '+')
             {
-                total += matchLength;
+                total += Math.Max(matchLength, 2);
                 i++;
-                while (char.IsDigit(next) && i + 1 < replacement.Length && char.IsDigit(replacement[i + 1]))
+            }
+            else if (char.IsDigit(next))
+            {
+                var end = i + 1;
+                while (end + 1 < replacement.Length && char.IsDigit(replacement[end + 1]))
                 {
-                    i++;
+                    end++;
                 }
+
+                total += Math.Max(matchLength, end - i + 1);
+                i = end;
             }
             else if (next == '{')
             {
                 var close = replacement.IndexOf('}', i + 2);
-                total += matchLength;
+                var tokenLength = close < 0 ? replacement.Length - i : close - i + 1;
+                total += Math.Max(matchLength, tokenLength);
                 i = close < 0 ? replacement.Length : close;
             }
             else
