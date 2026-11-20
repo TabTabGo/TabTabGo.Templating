@@ -38,7 +38,9 @@ jobs:
         run: python3 -m unittest discover .github/scripts
 
       - name: Restore
-        run: dotnet restore TabTabGo.Templating.sln --locked-mode # packages.lock.json is committed (central package management)
+        # packages.lock.json files are committed once a CI run on the .NET 11 SDK has produced them; until then a plain restore
+        run: |
+          if ls src/*/packages.lock.json >/dev/null 2>&1; then dotnet restore TabTabGo.Templating.sln --locked-mode; else dotnet restore TabTabGo.Templating.sln; fi
 
       - name: Build
         run: |

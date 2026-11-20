@@ -1,5 +1,8 @@
 # TabTabGo.Templating
 
+> **v11 line, pre-release (`11.0.0-rc.N`).** Same code and API as 10.0.0 on net11.0 with the .NET 11 RC 3 pins. It is built and tested on CI only (there is no .NET 11 SDK on the
+> development machines yet); it stays a pre-release until .NET 11 GA (checklist: spec 12.3 C5).
+
 Template rendering for TabTabGo products: Liquid text/HTML (DotLiquid) and Excel workbooks (Open XML).
 
 | Package | Purpose |
@@ -17,13 +20,13 @@ referenced together. None of the packages depends on `TabTabGo.Core` (ADR 0002):
 |---|---|---|---|
 | v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.4 is the security backport). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.N` | net10.0 | LTS line (this branch): every defect of spec section 6 fixed, sandboxing, options + DI, goldens, coverage gates |
-| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | pre-release (`-rc.N`) until .NET 11 GA; built and verified on CI only until a .NET 11 SDK is installed |
+| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | pre-release (`-rc.N`) until .NET 11 GA (this branch); built and verified on CI only until a .NET 11 SDK is installed |
 
 Design and decisions: `tabtabgo/docs/templating-modernization/` in the ttg-workspace (spec and ADRs 0001-0005).
 
 ## Building and testing
 
-The SDK is pinned by `global.json` (10.0.401, roll forward to the latest patch) and the tests run on Microsoft Testing Platform
+The SDK is pinned by `global.json` (11.0.100-rc.3.26522.148, pre-release allowed; Microsoft.Extensions 11.0.0-rc.3.26522.148 exactly) and the tests run on Microsoft Testing Platform
 (xunit.v3, coverlet.MTP, NSubstitute; ADR 0005). Packages are versioned centrally in `Directory.Packages.props` and restored with
 `packages.lock.json` files (`--locked-mode` on CI).
 
@@ -69,6 +72,12 @@ If a publish run fails part-way, do not re-run it: re-runs are refused. Fix the 
 
 Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=10.0.0 -o out`. Package validation compares with 6.0.5
 (`CompatibilitySuppressions.xml` lists the dropped target frameworks).
+
+## Release notes 11.0.0-rc.1
+
+No API or behaviour change compared with 10.0.0: the target framework is net11.0, `Microsoft.Extensions.*` are the .NET 11 RC 3 builds (exact pin), the SDK is
+`11.0.100-rc.3.26522.148`, and package validation compares with 10.0.0. DotLiquid, Humanizer, System.Linq.Dynamic.Core, Open XML SDK and Newtonsoft.Json have no net11 builds and resolve to
+their net10/net8 assets; the test suite proves the combination on CI. Not verified locally: any build or test on net11.0.
 
 ## Release notes 10.0.0
 

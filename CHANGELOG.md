@@ -3,6 +3,11 @@
 All notable changes per release line. The line is the major version: 8 = .NET 8, 10 = .NET 10, 11 = .NET 11. Spec and decisions:
 `tabtabgo/docs/templating-modernization/` in the ttg-workspace (row ids such as S-3 or X-2 refer to its section 6).
 
+## 11.0.0-rc.1 (pre-release)
+
+Target: net11.0 on the .NET 11 RC 3 SDK (`11.0.100-rc.3.26522.148`); Microsoft.Extensions 11.0.0-rc.3.26522.148. No API change compared with 10.0.0; package validation baseline 10.0.0.
+Built and tested on CI only (no .NET 11 SDK locally). Becomes 11.0.0 at .NET 11 GA after the spec 12.3 C5 checklist.
+
 ## 10.0.0
 
 Target: net10.0. Includes every 8.0.4 fix unchanged (fresh context per render, regex time-outs that propagate, include confinement, `AppSetting` opt-in, safe XML, JSON workbook
