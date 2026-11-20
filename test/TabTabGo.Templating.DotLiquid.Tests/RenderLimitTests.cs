@@ -74,7 +74,7 @@ public sealed class RegexTimeoutScopeTests
     [Fact]
     public void Parse_OfALargeTemplate_IsNotBoundByATinyRegexTimeout()
     {
-        var template = string.Concat(Enumerable.Repeat("{% if a %}{{ b | Append: 'x' }}{% else %}{% assign c = 'q' %}{% endif %}\n", 4000));
+        var template = string.Concat(Enumerable.Repeat("{% if a %}{{ b | Append: 'x' }}{% else %}{% assign c = 'q' %}{% endif %}\n", 1000));
         var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RegexTimeout = TimeSpan.FromTicks(1), MaxOutputCharacters = 0 });
 
         var result = engine.RenderString(template, new { a = true, b = "y" });

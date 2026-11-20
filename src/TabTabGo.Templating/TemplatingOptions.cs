@@ -42,7 +42,8 @@ namespace TabTabGo.Templating
         /// <summary>
         /// Time-out of each regular expression DotLiquid runs while it parses a template (DotLiquid's own default is 10 s and is process-wide: the strictest value
         /// of any engine wins and is never raised). Must be positive, never infinite. Default 5 seconds; separate from <see cref="RegexTimeout"/> so that a tight
-        /// filter time-out cannot fail the parse of a valid template.
+        /// filter time-out cannot fail the parse of a valid template. It only reaches expressions DotLiquid creates after it is set: create the engine before any other
+        /// use of DotLiquid (a host that parses with DotLiquid first keeps DotLiquid's 10 s default for those expressions).
         /// </summary>
         public TimeSpan ParseTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
