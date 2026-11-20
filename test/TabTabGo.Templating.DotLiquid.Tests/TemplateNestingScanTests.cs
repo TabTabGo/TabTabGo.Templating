@@ -85,6 +85,65 @@ public sealed class TemplateNestingScanTests
         Assert.NotNull(parsed);
     }
 
+    [Fact]
+    public void AShorthandComment_IsExpandedBeforeScanning_AsDotLiquidDoes()
+    {
+        // DotLiquid expands a template that is one {# ... #} into a comment block first; read as plain tokens its inner tags would count
+        const string whole = "{# {% if a %}{% if a %}{% if a %}{% endif %} #}";
+        Assert.Equal(1, TemplateNesting.Depth(whole));
+        Assert.Equal(string.Empty, new Liquid.TemplatingEngine().RenderString(whole, new { a = true }));
+
+        // anywhere else DotLiquid tokenizes {# and #} as text, so a tag inside them is a real tag, and a fake end tag there is counted as the parser counts it
+        const string inside = "{% if a %}{# {% endif %} #}{% if a %}{% endif %}{% endif %}";
+        Assert.Equal(1, TemplateNesting.Depth(inside));
+        Assert.Throws<SyntaxException>(() => Template.Parse(inside)); // the parser rejects what the scan saw as closing early
+    }
+
+    [Fact]
+    public void TheScan_GivesTheSameDepthAtSyntaxLevel20And22()
+    {
+        string[] corpus =
+        {
+            "{% if a %}{% for i in x %}{% unless a %}{% endunless %}{% endfor %}{% endif %}",
+            "{{ ' {% if a %} ' }}{% if a %}{# {% endif %} #}{% raw %}{% if a %}{% endraw %}{% endif %}",
+            "{%- if a -%}{%-endif-%}{% comment %}{% if a %}{% endcomment %}{% capture c %}{% case a %}{% when 1 %}{% endcase %}{% endcapture %}",
+        };
+        var original = Template.DefaultSyntaxCompatibilityLevel;
+        try
+        {
+            Template.DefaultSyntaxCompatibilityLevel = SyntaxCompatibility.DotLiquid20;
+            var at20 = corpus.Select(t => TemplateNesting.Depth(t)).ToArray();
+            Template.DefaultSyntaxCompatibilityLevel = SyntaxCompatibility.DotLiquid22;
+            var at22 = corpus.Select(t => TemplateNesting.Depth(t)).ToArray();
+
+            Assert.Equal(at20, at22);
+            Assert.All(at20, depth => Assert.True(depth > 0));
+        }
+        finally
+        {
+            Template.DefaultSyntaxCompatibilityLevel = original;
+        }
+    }
+
+    [Theory]
+    [InlineData("{% else %}")]
+    [InlineData("{% zzunknown %}")]
+    public void ManyContinuationOrUnregisteredTags_CostNoMoreThanTokenizingThem(string tag)
+    {
+        // DotLiquid throws a NullReferenceException for a name it does not register: once per tag it was 7.8 s of 14.7 s for 90 000 tags. DotLiquid's own tokenizer is
+        // superlinear, so the scan is compared with the tokenizer alone rather than with a wall-clock figure.
+        var template = "{% if a %}" + string.Concat(Enumerable.Repeat(tag, 40_000)) + "{% endif %}";
+        TemplateNesting.Depth(template); // warm up
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        TemplateNesting.Tokens(template);
+        var tokenizing = watch.ElapsedMilliseconds;
+        watch.Restart();
+
+        Assert.Equal(1, TemplateNesting.Depth(template));
+
+        Assert.True(watch.ElapsedMilliseconds <= tokenizing * 1.5 + 1000, $"scan {watch.ElapsedMilliseconds} ms, tokenizing alone {tokenizing} ms");
+    }
+
     /// <summary>The block nesting of a parsed template, measured on DotLiquid's own parse tree.</summary>
     private static int ParsedDepth(object node)
     {

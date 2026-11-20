@@ -49,7 +49,10 @@ Parsing happens before `RenderTimeout` starts (about 6 s per 1 000 000 character
 `MaxNestingDepth` (100) refuses a template that nests blocks deeper, by a linear scan before parsing: DotLiquid's parser recurses once per level, and a few thousand nested
 `{% if %}` tags overflow the stack and end the process (this was also true of 8.0.x and stock DotLiquid). The scan runs over DotLiquid's own tokens (so `{{ ... }}` output text and `{%-` tags split as the parser splits them), finds block tags through the registered tag types (custom blocks
 count), lowers the depth only for an end tag that closes the innermost open block, and skips `raw` and `comment` bodies (the tokenizer returns each as one text token). As a backstop the
-parse itself runs on a thread with a 256 MB stack (reserved, committed only as used), so a template the scan undercounted cannot overflow the caller's stack. A refused template throws `DotLiquid.Exceptions.SyntaxException`.
+parse itself runs on a thread with a 256 MB stack (reserved, committed only as used), so a template the scan undercounted cannot overflow the caller's stack.
+Two limits of the backstop: a host with strict memory overcommit (`vm.overcommit_memory=2`) may fail to start the 256 MB-stack thread, and it is not sized for `MaxTemplateCharacters` 0 or
+very large template files (about 110 000 nested blocks per 1 000 000 characters); the scan still applies in both cases. The scan binds to DotLiquid's internal tokenizer, so the package
+depends on DotLiquid `[2.3.260, 2.4.0)`; a bump goes through the architect and the nesting fuzz tests. A refused template throws `DotLiquid.Exceptions.SyntaxException`.
 
 **Hosts that render untrusted templates** should lower `RenderTimeout`, cap the number of concurrent renders and set `MaxTemplateCharacters` to what they need: one adversarial
 render can hold one CPU core for up to `RenderTimeout` and produce about 100 MB of output (twice `MaxOutputCharacters` in the worst case of output plus one growing string).

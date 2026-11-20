@@ -13,7 +13,7 @@
       },
       "DotLiquid": {
         "type": "Direct",
-        "requested": "[2.3.260, )",
+        "requested": "[2.3.260, 2.4.0)",
         "resolved": "2.3.260",
         "contentHash": "Fpiesi6qcFFeq6mgJZf5faZ5SyZEQcHNkQufcc8IrLhDJgZn0Hm+Vhxcd7zszs2s187VOQsuIXa7eW/2iIV6JQ=="
       },

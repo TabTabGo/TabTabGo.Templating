@@ -86,17 +86,19 @@ class VulnGateTests(unittest.TestCase):
 
 
 class AssertPackagesTests(unittest.TestCase):
-    def _write(self, directory, package_id, version, dep_version, tfm="net8.0"):
+    def _write(self, directory, package_id, version, dep_version, tfm="net8.0", dotliquid="[2.3.260, 2.4.0)"):
         dep = "" if package_id == "TabTabGo.Templating" else f'<dependency id="TabTabGo.Templating" version="{dep_version}" />'
+        if package_id == "TabTabGo.Templating.Dotliquid":
+            dep += f'<dependency id="DotLiquid" version="{dotliquid}" />'
         nuspec = f'<package><metadata><id>{package_id}</id><version>{version}</version><dependencies><group targetFramework="{tfm}">{dep}</group></dependencies></metadata></package>'
         with zipfile.ZipFile(directory / f"{package_id}.{version}.nupkg", "w") as z:
             z.writestr(f"{package_id}.nuspec", nuspec)
         (directory / f"{package_id}.{version}.snupkg").write_bytes(b"x")
 
-    def _dir(self, version="8.0.3", dep_version="8.0.3", tfm="net8.0"):
+    def _dir(self, version="8.0.3", dep_version="8.0.3", tfm="net8.0", dotliquid="[2.3.260, 2.4.0)"):
         directory = Path(tempfile.mkdtemp())
         for package_id in assert_packages.IDS:
-            self._write(directory, package_id, version, dep_version, tfm)
+            self._write(directory, package_id, version, dep_version, tfm, dotliquid)
         return directory
 
     def test_valid_set_passes(self):
@@ -105,6 +107,13 @@ class AssertPackagesTests(unittest.TestCase):
     def test_wrong_tfm_fails(self):
         self.assertTrue(assert_packages.check(self._dir(tfm="net10.0"), "8.0.3", "net8.0"))
 
+    def test_dotliquid_must_be_bound_to_the_tested_minor(self):
+        # R8: the nesting scan binds to DotLiquid's internal tokenizer, so the dependency is [2.3.260, 2.4.0)
+        for loose in ("2.3.260", "[2.3.260, )", "[2.3.260, 3.0.0)", "[2.3.0, 2.4.0)", "2.4.0"):
+            with self.subTest(loose=loose):
+                errors = assert_packages.check(self._dir(dotliquid=loose), "8.0.3", "net8.0")
+                self.assertTrue(any("DotLiquid" in e for e in errors))
+
     def test_wrong_dependency_version_fails(self):
         self.assertTrue(assert_packages.check(self._dir(dep_version="8.0.2"), "8.0.3", "net8.0"))
 
@@ -112,7 +121,7 @@ class AssertPackagesTests(unittest.TestCase):
         directory = self._dir(version="10.0.0", dep_version="10.0.0", tfm=tfm)
         path = directory / "TabTabGo.Templating.Dotliquid.10.0.0.nupkg"
         with zipfile.ZipFile(path, "w") as z:
-            z.writestr("x.nuspec", f'<package><metadata><id>TabTabGo.Templating.Dotliquid</id><version>10.0.0</version><dependencies><group targetFramework="{tfm}"><dependency id="TabTabGo.Templating" version="10.0.0" />{dependency}</group></dependencies></metadata></package>')
+            z.writestr("x.nuspec", f'<package><metadata><id>TabTabGo.Templating.Dotliquid</id><version>10.0.0</version><dependencies><group targetFramework="{tfm}"><dependency id="TabTabGo.Templating" version="10.0.0" /><dependency id="DotLiquid" version="[2.3.260, 2.4.0)" />{dependency}</group></dependencies></metadata></package>')
         return directory
 
     def test_any_tabtabgo_dependency_except_the_base_package_is_refused(self):

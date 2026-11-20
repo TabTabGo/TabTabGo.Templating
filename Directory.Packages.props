@@ -14,7 +14,7 @@
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.14" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.14" />
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageVersion Include="DotLiquid" Version="2.3.260" />
+    <PackageVersion Include="DotLiquid" Version="[2.3.260, 2.4.0)" /> <!-- bounded: the nesting scan uses DotLiquid's internal tokenizer (risk R8); a bump goes through the architect and the fuzz tests -->
     <PackageVersion Include="Humanizer.Core" Version="3.0.10" />
     <PackageVersion Include="Humanizer.Core.ar" Version="3.0.10" />
     <PackageVersion Include="System.Linq.Dynamic.Core" Version="1.7.4" />
