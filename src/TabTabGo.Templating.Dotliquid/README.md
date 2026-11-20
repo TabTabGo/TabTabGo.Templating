@@ -7,109 +7,98 @@ Liquid templates for text, e-mail and HTML, rendered with [DotLiquid](https://gi
 ```csharp
 var engine = new TabTabGo.Templating.Liquid.TemplatingEngine();
 
-// from a file (parsed once and cached by path)
+// from a file (parsed once and cached by full path and last write time)
 string html = (string)engine.Render("Templates/invoice.liquid", new { Customer = "Acme" }, "en-US");
 
 // from a string
-string text = engine.RenderString("Hello {{ customer }}", new { Customer = "Acme" }, "en-US");
+string text = engine.RenderString("Hello {{ Customer }}", new { Customer = "Acme" }, "en-US");
 ```
 
-Property names of plain objects keep their C# casing in templates (`{{ Customer }}`), and JSON keys keep the casing of
-the JSON (`{{ data.number }}`), as in the templates of the consuming repositories.
-
-Call `engine.Initialize()` once at start-up (`Render` does it for you). `RenderString` does **not** initialise the
-engine on the v8 line (B-4): if it is the first call in the process, custom filters are missing until `Initialize()`
-or `Render` has run.
+Property names of plain objects keep their C# casing in templates (`{{ Customer }}`), and JSON keys keep the casing of the JSON
+(`{{ data.number }}`). The engine initialises itself on first use (`Initialize()` is optional); one instance is safe to share between
+threads and to register as a singleton: every render has its own context, variables, file system and culture.
 
 ## Data model
 
 * plain objects (POCO/anonymous), dictionaries and collections;
-* `Newtonsoft.Json` `JObject`/`JArray` (deserialised to `dynamic` or passed directly). A `JObject` property `foo` is
-  also available as `fooJson` (the original token) for the `JSelect*` filters;
-* pass DTOs, not entity-framework entities with lazy navigation properties: the engine walks public properties.
+* `Newtonsoft.Json` `JObject`/`JArray` (directly or deserialised to `dynamic`). A `JObject` property `foo` of a plain object is also available as `fooJson`
+  (the original token) for the `JSelect*` filters;
+* `null` renders with no variables. A list, an array or a scalar as the root is exposed as `model` (`{% for i in model %}`);
+* the engine reads public instance properties only, never calls methods, stops `MaxDepth` levels (64) below the root and handles cycles. Pass DTOs, not
+  entity-framework entities with lazy navigation properties.
 
 ## Culture
 
-`Render(path, data, culture)` and `RenderString(template, data, culture)` build the DotLiquid `RenderParameters` with
-that culture. On the v8 line the culture-sensitive filters (`FormatNumber`, `FormatCurrency`, ...) take their culture from
-the **thread** unless the template passes a culture argument (bug B-6, fixed on v10).
+`Render(path, data, culture)` and `RenderString(template, data, culture)` format with that culture: the thread culture is set to it for the render and
+restored afterwards, also when the render throws. Parsing is invariant (data is JSON or XML); `Number` and `DivideBy` fall back to the render culture for text
+such as `1,5`.
 
 ## Includes and layouts
 
-`{% include 'name' %}` and `{% extends 'layout' %}` read `_name.liquid` from the directory of the template that is being
-rendered. The partial must stay under that directory: names that are rooted, that climb out of it with `..`, or that come
-from a non-string variable fail with `FileSystemException`. The file system belongs to the render (not to a process-wide
-static), so templates in different folders resolve their own partials when rendered concurrently, and each render starts
-from its own context: values set with `{% assign %}` or `{% capture %}` never carry over to another render of the same
-file. Use one engine instance per thread (or serialise calls): an instance still keeps a hash cache that is not thread-safe
-(bug B-3, fixed on v10).
+`{% include 'name' %}` and `{% extends 'layout' %}` read `_name.liquid` from the directory of the template that is being rendered. The partial must stay under
+that directory: names that are rooted, that climb out of it with `..`, that come from a non-string variable, or that resolve through a symbolic link to a file outside
+it fail with `FileSystemException`; messages never contain server paths. The file system belongs to the render, so templates in different folders resolve their own
+partials concurrently, and each render starts from its own context: `{% assign %}` and `{% capture %}` values never carry over to another render of the same file.
 
-`RenderString` parses on every call and has no template folder of its own. Includes inside a string template resolve
-against `TemplatingOptions.TemplatesPath` when it is set (confined to that folder, like `Render`); otherwise DotLiquid falls
-back to a file system the host assigned to `Template.FileSystem`, as before 8.0.4.
+`RenderString` parses on every call. Includes inside a string template resolve (confined) against `TemplatingOptions.TemplatesPath` when it is set; otherwise
+DotLiquid falls back to a file system the host assigned to `Template.FileSystem`.
+
+## Limits
+
+`MaxIterations`, `RenderTimeout`, `MaxOutputCharacters` and `MaxDepth` (see the options table of `TabTabGo.Templating`) bound a render. A render, a `capture` block or the
+result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat` longer than `MaxOutputCharacters` throws `RenderLimitExceededException` (a
+`TimeoutException`, which DotLiquid lets escape instead of printing "Liquid error"); a timed-out render and regular-expression time-outs in `Replace` propagate the same way.
+Callers should handle them like any render failure.
 
 ## Filters
 
-Filters are called with the C# member name: `{{ value | FormatNumber: 'C' }}`.
+Filters are called with the C# member name: `{{ value | FormatNumber: 'N2', 'en-US' }}`. Each example below is pinned by a golden case under
+`test/TabTabGo.Templating.DotLiquid.Tests/Golden/Liquid` or by a unit test.
 
-| Group | Filters |
-|---|---|
-| Collections | `SelectMany`, `XPathSelectMany`, `RemoveEmpty`, `Union`, `Filter`, `FilterBy`, `FilterByPrefix`, `Flatten`, `Distinct`, `OrderBy`, `GroupBy` |
-| Values and strings | `Contains`, `ToString`, `Select`, `XPathSelect`, `SliceEnd`, `ReverseSlice`, `Strip`, `Lstrip`, `Rstrip`, `GetMatch`, `FullPath`, `AppSetting` |
-| Numbers | `DivideBy`, `Number`, `FormatNumber`, `FormatCurrency`, `FormatCurrencyWithCode`, `MarkNumbers`, `ToWords` |
-| Dates | `ToTimeZone`, `OffsetDate`, `FormatDate`, `ParseDate` |
-| JSON | `JSelectToken`, `JSelectTokenByProperty`, `JSelectTokenValues`, `JSelectTokenValuesByProperty`, `JSelectTokenValue`, `EscapeJsonString` |
-| Other | `CountryName`, and the helpers `OpenXmlToString`, `OpenXmlType`, `OpenXmlFormat`, `OpenXmlMaxWidth` |
+| Filter | Example | Output |
+|---|---|---|
+| `FormatNumber: format [, culture]` | `{{ 1234.5 \| FormatNumber: 'N2', 'en-US' }}` | `1,234.50` (exact for `decimal` data) |
+| `FormatCurrency: culture` | `{{ 1234.5 \| FormatCurrency: 'en-US' }}` | `$1,234.50` |
+| `FormatCurrencyWithCode: culture, code` | `{{ 1234.5 \| FormatCurrencyWithCode: 'en-US', 'AED' }}` | `1,234.50 AED` |
+| `FormatDate: format [, culture]` | `{{ d \| FormatDate: 'dddd d MMMM yyyy', 'en-US' }}` (2026-01-15T10:30Z) | `Thursday 15 January 2026`; with `'ar-AE'`: `الخميس 15 يناير 2026` |
+| `OffsetDate: seconds` | `{{ d \| OffsetDate: 14400 \| FormatDate: 'yyyy-MM-dd HH:mm zzz', 'en-US' }}` | `2026-01-15 14:30 +04:00` |
+| `ToTimeZone: zone` | `{{ d \| ToTimeZone: 'Asia/Dubai' \| FormatDate: 'HH:mm zzz', 'en-US' }}` | `14:30 +04:00` (IANA or Windows id; daylight saving applies) |
+| `ParseDate: [format]` | `{{ '15/01/2026' \| ParseDate: 'dd/MM/yyyy' }}` | a date-time |
+| `ToWords: language` | `{{ 21 \| ToWords: 'en' }}` / `{{ 21 \| ToWords: 'ar' }}` | `Twenty-One` / `واحد و عشرون`; `1.999` is `Two`, `1234.56` is `One Thousand Two Hundred and Thirty-Four points Fifty-Six` |
+| `MarkNumbers` | `{{ 'ABC123' \| MarkNumbers }}` | `ABC&lrm;123` |
+| `Number`, `DivideBy: n` | `{{ '1.5' \| Number }}`, `{{ 10 \| DivideBy: 4 }}`, `{{ 10 \| DivideBy: 0 }}` | `1.5`, `2.5`, `0` |
+| `CountryName [: culture]` | `{{ 'AE' \| CountryName }}` | `United Arab Emirates` (an unknown code is returned unchanged; `'ar'` gives the native name) |
+| `Strip`, `Lstrip`, `Rstrip`, `SliceEnd: n`, `Contains: v`, `GetMatch: regex` | `{{ 'order-1234-x' \| GetMatch: '[0-9]+' }}` | `1234` |
+| `Union: other` | `{{ a \| Union: b }}` with `[1,2,3]`, `[3,4]` | `1,2,3,4`; an empty second list returns the first |
+| `Distinct` | `{{ ints \| Distinct }}` with `[1,1,2]` | `1,2` (hashes by content) |
+| `OrderBy: key` | `{{ items \| OrderBy: 'n' }}` | stable, numbers by value |
+| `GroupBy: key` | `{{ items \| GroupBy: 'k' }}` | groups with `Key` and `Items` (`Key` is empty for a missing value) |
+| `Flatten: path`, `SelectMany: key`, `RemoveEmpty` | `{{ orders \| Flatten: 'lines' }}` | the nested items |
+| `Filter: expr`, `FilterBy: key, value`, `FilterByPrefix: key, prefix` | `{{ items \| FilterBy: 'k', 'a' }}` | the matching items |
+| `JSelectToken`, `JSelectTokenValue`, `JSelectTokenValues`, `*ByProperty`, `ConvertToJObject`, `EscapeJsonString` | `{{ j \| JSelectTokenValue: '$.s' }}` | the scalar value (objects and arrays return the token) |
+| `XPathSelect: xpath`, `XPathSelectMany: xpath` | `{{ xml \| XPathSelect: '/r/a' }}` | the node value |
+| `AppSetting`, `FullPath` | `{{ 'Brand' \| AppSetting }}`, `{{ 'images/logo.png' \| FullPath }}` | the configured value or empty; a path relative to the template folder |
+| `OpenXmlType`, `OpenXmlFormat`, `OpenXmlMaxWidth`, `OpenXmlToString` | `{{ 'System.Int32' \| OpenXmlType }}` | `Number` (also `Boolean`, `Date`, `String`) |
 
-Examples (each one is covered by a test in `test/TabTabGo.Templating.DotLiquid.Tests`):
+### `Filter` (dynamic LINQ) and `FilterBy`
 
-```liquid
-{{ data.number | FormatNumber: 'C' }}                {% comment %} number:$12,345.00 under en-US {% endcomment %}
-{{ data.items | GroupBy: 'type' }}
-{{ data.file | FullPath }}
-```
-
-### `Filter` (dynamic LINQ)
-
-`{{ items | Filter: 'it["status"].ToString() = "active"' }}` evaluates a
-[System.Linq.Dynamic.Core](https://dynamic-linq.net/) 1.7 expression over the items (`it`). The engine configures
-`AllowEqualsAndToStringMethodsOnObject = true` so the existing expression shapes keep working
-(`it["k"].ToString() = "v"`, `.StartsWith("v")`, `== null`, `!= null`, `.Contains(...) and ...`). Reflection over
-types outside the predefined set is blocked by the library. Do not build expressions from untrusted data.
-
-### `FilterBy` and `FilterByPrefix`
-
-Prefer these to `Filter` when the value comes from data: `{{ items | FilterBy: 'status', 'active' }}` keeps the items whose
-`status` equals `active` (compared as text), `{{ items | FilterByPrefix: 'name', 'Al' }}` keeps those starting with `Al`
-(ordinal). No expression is parsed. `Filter`'s `.StartsWith("x")` is culture-sensitive, so the two differ for characters
-that ICU ignores (for example a soft hyphen).
+`{{ items | Filter: 'it["status"].ToString() = "active"' }}` evaluates a [System.Linq.Dynamic.Core](https://dynamic-linq.net/) 1.7 expression over the items (`it`).
+`ToString()`/`Equals()` on `object` are allowed so existing expression shapes keep working (`it["k"].ToString() = "v"`, `.StartsWith("v")`, `== null`, `!= null`,
+`.Contains(...) and ...`); reflection over other types is blocked. Do not build expressions from untrusted data. Prefer `FilterBy: 'status', 'active'` (compared as text)
+and `FilterByPrefix: 'name', 'Al'` (ordinal): no expression is parsed. `Filter`'s `.StartsWith` is culture-sensitive, so the two differ for characters ICU ignores.
 
 ### `AppSetting`, `GetMatch`, `XPathSelect`
 
-* `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is an empty string.
-  Host configuration files are never read.
-* `GetMatch` and the JSONPath filters (`JSelectToken*`, regex in `[?(@.n =~ /.../)]`) stop after `TemplatingOptions.RegexTimeout` and
-  degrade per expression: `GetMatch` returns an empty string, the JSONPath filters match nothing.
-* A time-out in DotLiquid's built-in `Replace`/`ReplaceFirst` throws `RegexMatchTimeoutException` out of `Render`/`RenderString` (DotLiquid
-  cannot degrade those per expression, and a failed render must not look like a result). These filters read DotLiquid's process-wide
-  `Template.RegexTimeOut`, which `Initialize()` lowers to the shortest `RegexTimeout` of any engine initialised so far (the strictest engine
-  wins; it is never raised). Engines used only through `RenderString` without `Initialize()` never contribute (bug B-4): call `Initialize()`
-  at start-up. The same static also bounds DotLiquid's template tokenizer, so keep `RegexTimeout` at 50 ms or more.
-* `XPathSelect`/`XPathSelectMany` reject any XML that has a `<!DOCTYPE ...>` (even a plain `<!DOCTYPE html>`, which renders
-  as `Liquid error`) and documents larger than `MaxXmlCharacters`. Strip the DOCTYPE before passing XML to the filter.
+* `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is empty. Host configuration files are never read.
+* `GetMatch` and the JSONPath filters (regex in `[?(@.n =~ /.../)]`) stop after `RegexTimeout` and degrade per expression (empty result).
+* DotLiquid's built-in `Replace`/`ReplaceFirst` time out at the strictest `RegexTimeout` of any engine (DotLiquid keeps that setting process-wide; it is lowered, never raised) and
+  throw `RegexMatchTimeoutException` out of the render.
+* `XPathSelect`/`XPathSelectMany` reject XML with a `<!DOCTYPE>` (rendered as `Liquid error`) and documents larger than `MaxXmlCharacters`.
 
 ### Custom filters
 
-`engine.RegisterFilter(typeof(MyFilters))` registers a static class of filters. Registration is process-wide: do it
-once at start-up.
+`engine.RegisterFilter(typeof(MyFilters))` registers a static class of filters. Registration is process-wide: do it once at start-up.
 
 ## Tags
 
-`{% increment name %}` adds 1 to the integer variable `name` in the outermost scope. The variable must already exist
-(a missing variable fails on the v8 line, bug F-12).
-
-## Known issues on the v8 line
-
-Fixed on v10, not on v8: filter, culture and typing bugs F-1..F-17, the per-instance hash cache (B-3: do not share one
-engine instance across threads on v8; create one per render or serialise), and `RenderString` not initialising the engine
-(B-4). The 8.0.4 release closes S-1..S-5, B-1 and B-2 and the shared-template leak. See `tabtabgo/docs/templating-modernization/spec.md` section 6.
+`{% increment name %}` adds 1 to the integer variable `name` (a missing variable starts at 1) without output. `{% capture %}` is DotLiquid's tag with a bounded buffer.

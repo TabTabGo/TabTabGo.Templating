@@ -4,12 +4,13 @@ Fills Excel (`.xlsx`) templates with data, using the Open XML SDK 3.x. No Excel 
 
 ```csharp
 var engine = new TabTabGo.Templating.OpenXml.SpreadSheet.TemplatingEngine();
-var stream = (MemoryStream)engine.Render("Template/report.xlsx", new { reportResult = jobject });
+var stream = (MemoryStream)engine.Render("Template/report.xlsx", new { title = "Report" });
 File.WriteAllBytes("report.xlsx", stream.ToArray());
 ```
 
-`Render(templatePath, data, culture)` returns a `MemoryStream`. `RenderString` is not supported and `RegisterFilter` is a
-no-op for this engine.
+`Render(templatePath, data, culture)` returns a `MemoryStream` positioned at the start (the caller disposes it). `data` is an object, a `JObject` or a `JArray` (the array is `$`);
+null throws `ArgumentNullException`. `RenderString` is not supported and `RegisterFilter` is a no-op. Nothing is written to disk, a render has its own state, and one engine instance
+can render in parallel.
 
 ## Template syntax
 
@@ -17,31 +18,39 @@ Place expressions in cells of the template workbook:
 
 | Syntax | Meaning |
 |---|---|
-| `{%path%}` | value at `path` in the data (for example `{%reportResult.title%}`) |
-| `{%array::item.property%}` | the `::` marker repeats the template row for every item of `array` |
-| `{%path:#IS%}` / `{%path:#SS%}` | write as inline string / shared string |
-| `{%path:#<format>%}` | write as text using a .NET format string |
-| formulas in the template row | copied per row; shared formulas are re-created for the new rows |
+| `{%$.path%}` | value at the JSONPath `path` (for example `{%$.title%}`) |
+| `{%$.items::name%}` | in the template row of a table, `::` repeats the row for every item of `$.items` and takes `name` from the item |
+| `{%$.path:#IS%}` / `{%$.path:#SS%}` | write as inline string / shared string |
+| `{%$.path:#N%}` | parse text as a number (invariant); text that is not a number stays text |
+| `{%$.date:#dd MMMM yyyy%}` | write a date as text with a .NET format in the render culture |
+| a formula in the template row | becomes a shared formula over the new rows (each column its own `si`) |
 
-Cell expressions understand binary and `SUM` expressions (`CellExpression` family).
+**Table rules.** The table's range starts with the header; the template row is the row after it; rows below the template row inside the table range (a totals row) follow the
+data. An empty array leaves one blank row. Rows below the table keep their distance (gaps included); merged cells, other tables, filters and shared-formula ranges below follow.
+
+## Typing rules
+
+| JSON | Cell |
+|---|---|
+| integer, float, decimal | number, written with `.` whatever the server culture (`NaN`/`Infinity` become text) |
+| boolean | boolean (`1`/`0`) |
+| date | Excel serial number; the template cell's style formats it. With an explicit `:#format` it is text |
+| string | text, never converted (`00123` and `+971...` stay text) |
+| null or missing | empty text |
+| object, array | JSON text |
+
+Characters that are not valid XML 1.0 are removed; emoji and other supplementary characters are kept.
 
 ## JSON workbook mode
 
-`Render(null, data)` with `data.Workbook` describing sheets, columns and styles generates a workbook from scratch
-(`JsonSpreedSheet`). Cell `DataType` is one of `String`, `Number`, `Boolean`, `Date`, `Error`, `SharedString`,
-`InlineString` (unknown names become `String`). Before 8.0.4 this mode threw for every cell (bug X-1).
+`Render("", data)` with `data.Workbook` describing sheets, columns and styles generates a workbook from scratch (`JsonSpreedSheet`). Every entry of `Workbook.Sheets` becomes a sheet that
+uses the single `Workbook.Worksheet` definition. Cell `DataType` is one of `String`, `Number`, `Boolean`, `Date`, `Error`, `SharedString`, `InlineString` (unknown names become `String`);
+dates are serial numbers with a date style. Without `Workbook.Stylesheets` a minimal valid stylesheet is generated (style index 5 is a date).
 
-## Behaviour notes
+A workbook may name a stylesheet (`Workbook.Stylesheets.TemplatePath`). The path must be relative and stay inside `TemplatingOptions.StylesheetRoot` (a relative root is resolved against the
+application base directory, which is also the default; `TemplatesPath` is never used); rooted, UNC and `..` paths fail with `ArgumentException`, and the XML must not contain a DOCTYPE.
 
-* A JSON workbook may name a stylesheet (`Workbook.Stylesheets.TemplatePath`). The path must be relative and stay inside
-  `TemplatingOptions.StylesheetRoot` (a relative root is resolved against the application base directory, which is also the default;
-  `TemplatesPath` is never used). Rooted, UNC and `..` paths fail with `ArgumentException`, and the XML must not contain a DOCTYPE
-  (S-7, 8.0.4). **Behaviour change:** 6.0.5 accepted absolute and UNC stylesheet paths; they now fail. No consumer in the workspace uses
-  `Workbook.Stylesheets`.
-* Rendering happens in memory: no temporary file is created, even when a render fails (X-3, 8.0.4).
-* A boolean value is written as `1`/`0` in a boolean cell, so `true` shows as TRUE (X-2, 8.0.4).
+## Limitations
 
-## Known issues on the v8 line
-
-Typing, date and table fixes (X-4..X-19) ship on v10. One engine instance keeps per-render state: do not share it across
-threads (B-7). See `tabtabgo/docs/templating-modernization/spec.md` section 6.4.
+Tables placed side by side on the same rows are not supported. Formulas, conditional formats, data validations and defined names that point *below* an expanded table keep their old
+references (a formula in the template row itself is adjusted). Only `A1+B1` and `SUM(A1:A5)` are understood by the `CellExpression` parser.
