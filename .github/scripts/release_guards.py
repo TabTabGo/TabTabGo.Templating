@@ -87,15 +87,14 @@ def check_tag_points_at_sha(tag: str, sha: str) -> None:
 
 
 def check_release_branch(sha: str, core: dict[str, str | bool]) -> None:
-    """Step 4: the tagged commit is on origin/releases/vM.m.x/vM.m.p (a pre-release may also use its full version, vM.m.p-rc.N)."""
-    prefix = f"origin/releases/v{core['major']}.{core['minor']}.x/"
-    accepted = {prefix + f"v{core['core']}", prefix + f"v{core['version']}"}
+    """Step 4: the tagged commit is on origin/releases/vM.m.x/vM.m.p."""
+    branch = f"origin/releases/v{core['major']}.{core['minor']}.x/v{core['core']}"
     result = subprocess.run(
         ["git", "branch", "-r", "--contains", sha], check=True, capture_output=True, text=True
     )
     branches = {line.strip() for line in result.stdout.splitlines()}
-    if not accepted & branches:
-        raise GuardError(f"commit {sha} is not on release branch {' or '.join(sorted(accepted))}")
+    if branch not in branches:
+        raise GuardError(f"commit {sha} is not on release branch {branch}")
 
 
 def declared_version(root: Path) -> str:
