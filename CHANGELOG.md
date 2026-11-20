@@ -10,7 +10,7 @@ mode, no temp files). No public API of 8.0.4 was removed or changed.
 
 ### Added
 - `TemplatingOptions`: `MaxIterations`, `RenderTimeout`, `MaxOutputCharacters`, `MaxDepth`, `AllowAbsolutePaths`; every numeric option is validated by the engine constructors.
-- `RenderLimitExceededException`, `GuardedStringFilters` and `GuardedCapture` (bounded `capture`, `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat`).
+- `RenderLimitExceededException`, and internal guards (bounded `capture`, `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat`) that return what the stock DotLiquid 2.3.260 filters return within the limit.
 - `CountryName(code, culture)`, exact `decimal` overloads of `FormatNumber`.
 - OpenXml: valid default stylesheet, one worksheet part per JSON-workbook sheet, per-render `RenderSession`.
 - Test kit (`TabTabGo.Templating.TestKit`): golden helpers for text and workbooks, workbook builder; 31 Liquid and 6 workbook goldens; coverage gate in CI.

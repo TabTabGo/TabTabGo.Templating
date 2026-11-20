@@ -88,8 +88,11 @@ Fixed:
 
 Behaviour changes to check before upgrading (v10.0.0 compared with 8.0.4):
 1. **Output limit.** A render, a `capture` block or the result of `Append`, `Prepend`, `Join`, `Replace`, `ReplaceFirst`, `Plus`, `Times`, `Concat` longer than
-   `MaxOutputCharacters` (default 50 000 000) throws `RenderLimitExceededException` (it derives from `TimeoutException`). `MaxIterations` (100 000) and
-   `RenderTimeout` (30 s) apply to every render; 0 / `Timeout.InfiniteTimeSpan` disables them.
+   `MaxOutputCharacters` (default 50 000 000) throws `RenderLimitExceededException` (it derives from `TimeoutException`). `MaxIterations` (100 000 items in one
+   `for` loop; each loop counts separately) and `RenderTimeout` (30 s) apply to every render; 0 / `Timeout.InfiniteTimeSpan` disables them.
+   The three limits surface as three exception types: `RenderLimitExceededException` (output limit; regular-expression time-outs are a `RegexMatchTimeoutException`, also a
+   `TimeoutException`), `DotLiquid.Exceptions.MaximumIterationsExceededException` (a DotLiquid `RenderException`, not a `TimeoutException`) and
+   `OperationCanceledException` (the render time-out). A host that catches `TimeoutException` does not catch the last two.
 2. **`FullPath` returns a path relative to the template folder** unless `AllowAbsolutePaths` is true (hosts that give the path to a PDF renderer opt in).
 3. **Culture.** Filters format with the render culture (the `culture` argument); numbers and dates in data are parsed invariantly. `Number`/`DivideBy` of
    text such as `1,5` fall back to the render culture; division by zero is 0.

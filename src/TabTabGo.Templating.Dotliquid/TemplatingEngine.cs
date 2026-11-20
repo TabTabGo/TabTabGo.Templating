@@ -236,7 +236,9 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
     {
         Interlocked.Increment(ref _parseCount);
         var template = Template.Parse(File.ReadAllText(fullPath));
-        template.MakeThreadSafe(); // the instance is shared; renders use their own Context (see RenderCore)
+        // Defence in depth, no test can observe it: render isolation comes from the per-render Context (tested in RenderIsolationTests). Without this
+        // call the cached template would keep a reference to the last render's registers and assigns.
+        template.MakeThreadSafe();
         return template;
     }
 }
