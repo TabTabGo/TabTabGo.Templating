@@ -48,6 +48,32 @@ class TfmAndVersionTests(unittest.TestCase):
             release_guards.check_declared_version(root, "8.0.4")
 
 
+class PinGuardTests(unittest.TestCase):
+    def _repo(self, packages="", global_json="{}"):
+        root = Path(tempfile.mkdtemp())
+        (root / "src").mkdir()
+        (root / "Directory.Packages.props").write_text(f"<Project><ItemGroup>{packages}</ItemGroup></Project>")
+        (root / "global.json").write_text(global_json)
+        return root
+
+    def test_stable_tag_with_stable_pins_passes(self):
+        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="10.0.14" />'), False)
+
+    def test_stable_tag_refuses_prerelease_pin_and_sdk(self):
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="11.0.0-rc.3.26522.148" />'), False)
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo(global_json='{"sdk":{"allowPrerelease":true}}'), False)
+
+    def test_prerelease_tag_accepts_prerelease_pins(self):
+        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="11.0.0-rc.3.26522.148" />', '{"sdk":{"allowPrerelease":true}}'), True)
+
+    def test_local_build_is_never_accepted(self):
+        for prerelease in (False, True):
+            with self.assertRaises(release_guards.GuardError):
+                release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="TabTabGo.Core" Version="10.0.0-local.abc1234" />'), prerelease)
+
+
 class VulnGateTests(unittest.TestCase):
     def test_clean_report(self):
         self.assertEqual([], vuln_gate.find_vulnerabilities({"projects": [{"path": "a.csproj"}]}))
@@ -80,6 +106,30 @@ class AssertPackagesTests(unittest.TestCase):
 
     def test_wrong_dependency_version_fails(self):
         self.assertTrue(assert_packages.check(self._dir(dep_version="8.0.2"), "8.0.3", "net8.0"))
+
+    def _with_dependency(self, tfm, dependency):
+        directory = self._dir(version="10.0.0", dep_version="10.0.0", tfm=tfm)
+        path = directory / "TabTabGo.Templating.Dotliquid.10.0.0.nupkg"
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("x.nuspec", f'<package><metadata><id>TabTabGo.Templating.Dotliquid</id><version>10.0.0</version><dependencies><group targetFramework="{tfm}"><dependency id="TabTabGo.Templating" version="10.0.0" />{dependency}</group></dependencies></metadata></package>')
+        return directory
+
+    def test_core_dependency_must_be_the_bounded_range_of_the_line(self):
+        ok = '<dependency id="TabTabGo.Core" version="[10.0.0, 11.0.0)" />'
+        self.assertEqual([], assert_packages.check(self._with_dependency("net10.0", ok), "10.0.0", "net10.0"))
+        for bad in ('<dependency id="TabTabGo.Core" version="10.0.0" />', '<dependency id="TabTabGo.Core" version="[10.0.0, 12.0.0)" />',
+                    '<dependency id="TabTabGo.Core" version="[11.0.0, 12.0.0)" />'):
+            with self.subTest(bad=bad):
+                self.assertTrue(assert_packages.check(self._with_dependency("net10.0", bad), "10.0.0", "net10.0"))
+
+    def test_local_dependency_is_refused(self):
+        bad = '<dependency id="TabTabGo.Core" version="[10.0.0-local.abc1234, 11.0.0)" />'
+        errors = assert_packages.check(self._with_dependency("net10.0", bad), "10.0.0", "net10.0")
+        self.assertTrue(any("local build" in e for e in errors))
+
+    def test_microsoft_extensions_must_match_the_line(self):
+        self.assertEqual([], assert_packages.check(self._with_dependency("net10.0", '<dependency id="Microsoft.Extensions.Options" version="10.0.14" />'), "10.0.0", "net10.0"))
+        self.assertTrue(assert_packages.check(self._with_dependency("net10.0", '<dependency id="Microsoft.Extensions.Options" version="8.0.2" />'), "10.0.0", "net10.0"))
 
     def test_extra_file_fails(self):
         directory = self._dir()

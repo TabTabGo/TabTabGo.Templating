@@ -54,7 +54,7 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore TabTabGo.Templating.sln
+        run: dotnet restore TabTabGo.Templating.sln --locked-mode # packages.lock.json is committed (central package management)
 
       - name: Build
         env:
@@ -64,8 +64,8 @@ jobs:
           if grep -q '<TtgWarnAsError>true</TtgWarnAsError>' Directory.Build.props; then extra="-warnaserror"; fi
           dotnet build TabTabGo.Templating.sln -c Release --no-restore -p:Version="$VERSION" $extra
 
-      - name: Test (gating)
-        run: dotnet test TabTabGo.Templating.sln -c Release --no-build --logger "console;verbosity=normal"
+      - name: Test with coverage (gating: 85 % lines, 75 % branches per package)
+        run: python3 .github/scripts/run_tests.py --no-build
 
       - name: Vulnerability gate
         shell: bash # explicit shell enables pipefail

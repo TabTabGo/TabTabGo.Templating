@@ -114,6 +114,24 @@ def check_declared_version(root: Path, core: str) -> None:
         raise GuardError(f"Directory.Build.props declares Version {declared} but the tag is for {core}")
 
 
+def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
+    """A stable tag may not ship with pre-release SDK settings or pre-release or -local package pins (v11 stays an rc until GA)."""
+    problems: list[str] = []
+    global_json = root / "global.json"
+    if not prerelease and global_json.exists() and re.search(r'"allowPrerelease"\s*:\s*true', global_json.read_text(encoding="utf-8-sig")):
+        problems.append("global.json allows a pre-release SDK")
+    for path in [root / "Directory.Packages.props", root / "Directory.Build.props", *sorted((root / "src").glob("*/*.csproj"))]:
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8-sig")
+        if "-local" in text:
+            problems.append(f"{path.name} references a -local build")
+        if not prerelease and re.search(r'Version="[^"]*-(rc|preview|alpha|beta)[^"]*"', text):
+            problems.append(f"{path.name} pins a pre-release package")
+    if problems:
+        raise GuardError("; ".join(problems) + (" (a stable tag needs stable pins; tag an -rc instead)" if not prerelease else ""))
+
+
 def published_versions(package_id: str) -> set[str]:
     url = f"https://api.nuget.org/v3-flatcontainer/{package_id.lower()}/index.json"
     try:
@@ -147,6 +165,7 @@ def main(argv: list[str]) -> int:
             check_tag_points_at_sha(args.tag, args.sha)
         check_release_branch(args.sha, info)
         check_declared_version(root, str(info["core"]))
+        check_pins_match_release_kind(root, bool(info["prerelease"]))
         if not args.offline:
             check_not_published(str(info["version"]))
     except GuardError as error:

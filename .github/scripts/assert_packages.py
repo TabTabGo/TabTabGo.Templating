@@ -23,6 +23,30 @@ def nuspec_text(package: Path) -> str:
         return archive.read(name).decode("utf-8-sig")
 
 
+def tfm_major(tfm: str | None) -> int | None:
+    match = re.fullmatch(r"net(\d+)\.0", tfm or "")
+    return int(match.group(1)) if match else None
+
+
+def check_dependencies(package_id: str, text: str, major: int | None) -> list[str]:
+    """Core-range guard: no -local build may be a dependency, TabTabGo.* dependencies other than the base package must be
+    bounded to the line ([M.0.0, M+1.0.0)), and Microsoft.Extensions.* must belong to the line's major."""
+    errors: list[str] = []
+    for dep_id, dep_version in re.findall(r'<dependency id="([^"]+)" version="([^"]+)"', text):
+        if "-local" in dep_version:
+            errors.append(f"{package_id}: dependency {dep_id} {dep_version} is a local build and must never be published")
+        if major is None:
+            continue
+        if dep_id.startswith("TabTabGo.") and dep_id not in IDS:
+            if not re.fullmatch(rf"\[{major}\.0\.0(-[^,]*)?, {major + 1}\.0\.0\)", dep_version):
+                errors.append(f"{package_id}: dependency {dep_id} {dep_version} is not the bounded range [{major}.0.0, {major + 1}.0.0)")
+        if dep_id.startswith("Microsoft.Extensions."):
+            lowest = dep_version.lstrip("[(").split(",")[0]
+            if not lowest.startswith(f"{major}."):
+                errors.append(f"{package_id}: dependency {dep_id} {dep_version} does not belong to .NET {major}")
+    return errors
+
+
 def check(directory: Path, version: str, tfm: str | None) -> list[str]:
     errors: list[str] = []
     expected = {f"{package_id}.{version}.{ext}" for package_id in IDS for ext in ("nupkg", "snupkg")}
@@ -38,6 +62,7 @@ def check(directory: Path, version: str, tfm: str | None) -> list[str]:
             groups = re.findall(r'<group targetFramework="([^"]+)"', text)
             if not groups or set(groups) != {tfm}:
                 errors.append(f"{package_id}: dependency groups {groups} are not exactly {tfm}")
+        errors.extend(check_dependencies(package_id, text, tfm_major(tfm)))
         if package_id != "TabTabGo.Templating":
             dependency = re.search(r'<dependency id="TabTabGo\.Templating" version="([^"]+)"', text)
             minimum = dependency.group(1).lstrip("[").split(",")[0] if dependency else None
