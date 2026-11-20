@@ -24,7 +24,7 @@ public sealed class EngineConcurrencyTests : IDisposable
     [Fact]
     public void Hash_KeyEqualObjects_RenderOwnValues()
     {
-        var path = _dir.Write("t.liquid", "{{ a.value }}-{{ b.value }}");
+        var path = _dir.Write("t.liquid", "{{ a.Value }}-{{ b.Value }}");
         var data = new { a = new Keyed { Key = "k", Value = "one" }, b = new Keyed { Key = "k", Value = "two" } };
 
         var result = new Liquid.TemplatingEngine().Render(path, data);

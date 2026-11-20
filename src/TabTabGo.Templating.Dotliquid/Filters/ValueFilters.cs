@@ -21,23 +21,29 @@ namespace TabTabGo.Templating.Liquid.Filters
 
         public static string FullPath(string input)
         {
+            var scope = RenderScope.Current;
+            var fileSystem = (object?)scope?.FileSystem ?? Template.FileSystem;
             var root = Path.GetFullPath(".");
-
-            var fileSystem = (object)RenderScope.Current?.FileSystem ?? Template.FileSystem;
-            var rootProperty = fileSystem.GetType().GetProperty("Root");
-            if (rootProperty != null)
+            if (fileSystem?.GetType().GetProperty("Root")?.GetValue(fileSystem) is string { Length: > 0 } configured)
             {
-                root = (string)rootProperty.GetValue(fileSystem);
+                root = Path.GetFullPath(configured);
             }
-  
 
+            var absolute = string.IsNullOrEmpty(input) ? root : Path.GetFullPath(Path.Combine(root, input));
+            if (RenderScope.CurrentOptions.AllowAbsolutePaths)
+            {
+                return absolute;
+            }
+
+            // S-6/S-12: without AllowAbsolutePaths the output never names the server folder the templates live in.
             if (string.IsNullOrEmpty(input))
             {
-                return root;
+                return string.Empty;
             }
 
-            var rootedPath = Path.Combine(root, input);
-            return Path.GetFullPath(rootedPath);
+            var relative = Path.GetRelativePath(root, absolute);
+            var endsWithSeparator = input.EndsWith('/') || input.EndsWith(Path.DirectorySeparatorChar);
+            return endsWithSeparator && !relative.EndsWith(Path.DirectorySeparatorChar) ? relative + Path.DirectorySeparatorChar : relative;
         }
 
         public static bool Contains(string input, string value)

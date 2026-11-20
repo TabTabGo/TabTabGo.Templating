@@ -21,7 +21,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="options">The options.</param>
         public JsonSpreedSheet(TemplatingOptions options)
         {
-            _options = TemplatingOptionsValidator.Validate(options, validateRegexTimeout: false);
+            _options = TemplatingOptionsValidator.Validate(options, validateRenderLimits: false);
         }
 
         public void CreateExcelDoc(string fileName, JObject json)

@@ -1,29 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-#if NET452
-using System.Configuration;
-#else
-using Microsoft.Extensions.Configuration;
-#endif
+﻿using Microsoft.Extensions.Configuration;
 
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+namespace TabTabGo.Templating;
 
-namespace TabTabGo.Templating
+/// <summary>Reads the templating section from the application settings file.</summary>
+public class Configuration
 {
-    public class Configuration
+    /// <summary>Reads the <c>TabTabGo.Templating</c> section of the settings file in the application base directory (the file is optional).</summary>
+    [Obsolete("Use services.AddTabTabGoTemplating(configuration) and TemplatingOptions instead.")]
+    public static TemplatingConfigurationSection GetTemplatingConfiguration()
     {
-        public static TemplatingConfigurationSection GetTemplatingConfiguration()
-        {
-
-            var configBuilder = new ConfigurationBuilder()
-                .SetBasePath(AppContext.BaseDirectory)
-                .AddJsonFile("appsettigs.json")
-                .Build();
-            var templatingConfig = new TemplatingConfigurationSection();
-            configBuilder.GetSection(TemplatingConfigurationSection.SectionName).Bind(templatingConfig);
-            return templatingConfig;
-        }
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: true)
+            .Build();
+        var section = new TemplatingConfigurationSection();
+        configuration.GetSection(TemplatingOptions.SectionName).Bind(section);
+        return section;
     }
 }

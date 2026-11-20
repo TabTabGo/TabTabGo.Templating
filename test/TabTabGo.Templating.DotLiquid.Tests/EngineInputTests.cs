@@ -14,7 +14,7 @@ public sealed class EngineInputTests : IDisposable
     /// <summary>Puts the process-wide DotLiquid state back to "no engine was ever used".</summary>
     private static void ForgetEveryInitialisation()
     {
-        typeof(Liquid.TemplatingEngine).GetField("_isIinitialized", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, false);
+        typeof(Liquid.TemplatingEngine).GetField("_isInitialized", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, false);
         global::DotLiquid.Template.NamingConvention = new global::DotLiquid.NamingConventions.RubyNamingConvention();
     }
 
@@ -119,7 +119,7 @@ public sealed class EngineInputTests : IDisposable
         var engine = new Liquid.TemplatingEngine(new TemplatingOptions { MaxDepth = 5 });
 
         // the root is depth 0; objects up to MaxDepth levels below it are converted, deeper ones are null
-        var result = engine.RenderString("{{ next.next.next.next.next.name }}|{{ next.next.next.next.next.next.name }}", head);
+        var result = engine.RenderString("{{ Next.Next.Next.Next.Next.Name }}|{{ Next.Next.Next.Next.Next.Next.Name }}", head);
 
         Assert.Equal("5|", result);
     }
@@ -131,7 +131,7 @@ public sealed class EngineInputTests : IDisposable
         var b = new Node { Name = "b", Next = a };
         a.Next = b;
 
-        var result = new Liquid.TemplatingEngine().RenderString("{{ name }}{{ next.name }}{{ next.next.name }}", a);
+        var result = new Liquid.TemplatingEngine().RenderString("{{ Name }}{{ Next.Name }}{{ Next.Next.Name }}", a);
 
         Assert.Equal("aba", result);
     }

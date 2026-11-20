@@ -36,7 +36,7 @@ public sealed class TemplatingEngineTests : IDisposable
     public void ParseTemplate_MissingFile_Throws()
     {
         var engine = new Liquid.TemplatingEngine();
-        Assert.Throws<Exception>(() => engine.ParseTemplate(Path.Combine(_dir, "none.liquid")));
+        Assert.Throws<FileNotFoundException>(() => engine.ParseTemplate(Path.Combine(_dir, "none.liquid")));
     }
 
     [Fact]

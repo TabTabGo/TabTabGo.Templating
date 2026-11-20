@@ -18,16 +18,14 @@ namespace TabTabGo.Templating.Liquid.Filters
                 return 0;
             }
 
-            if (double.TryParse(input.ToString(), out double leftSide))
+            if (TryParseDouble(input.ToString(), out var leftSide) && TryParseDouble(operand.ToString(), out var rightSide) && rightSide != 0)
             {
-                if (double.TryParse(operand.ToString(), out double rightSide))
-                {
-                    return leftSide / rightSide;
-                }
+                return leftSide / rightSide;
             }
 
             return 0;
         }
+
         public static double Number(string input)
         {
             if (string.IsNullOrEmpty(input))
@@ -42,11 +40,17 @@ namespace TabTabGo.Templating.Liquid.Filters
                 return Number("-0" + input.Replace("-",""));
             }
 
-            double value = 0.0;
+            return TryParseDouble(input.Trim(), out var value) ? value : 0.0;
+        }
 
-            double.TryParse(input.Trim(), out value);
-
-            return value;
+        /// <summary>
+        /// Data is JSON or XML, so numbers are parsed invariantly (F-11). Only when that fails does the render culture (the thread
+        /// culture during a render) get a chance, for text such as <c>1,5</c> typed by a user.
+        /// </summary>
+        private static bool TryParseDouble(string? text, out double value)
+        {
+            return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+                || double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, CultureInfo.CurrentCulture, out value);
         }
 
         public static string FormatNumber(double input, string format)

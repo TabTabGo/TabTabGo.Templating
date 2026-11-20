@@ -1,19 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-#if NET452
-using System.Configuration;
-#endif
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace TabTabGo.Templating;
 
-namespace TabTabGo.Templating
+/// <summary>Configuration section of the engines. Prefer <see cref="TemplatingOptions"/> with <c>AddTabTabGoTemplating</c>.</summary>
+public class TemplatingConfigurationSection
 {
+    /// <summary>Name of the section.</summary>
+    [Obsolete("Use TemplatingOptions.SectionName.")]
+    public static string SectionName = TemplatingOptions.SectionName;
 
-    public class TemplatingConfigurationSection
-    {
-        public static string SectionName = "TabTabGo.Templating";
-        public string TemplatesPath { get; set; }
-
-    }
+    /// <summary>Base path of the templates.</summary>
+    public string? TemplatesPath { get; set; }
 }
