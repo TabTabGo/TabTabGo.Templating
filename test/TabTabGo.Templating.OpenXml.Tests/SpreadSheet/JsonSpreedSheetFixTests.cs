@@ -1069,4 +1069,39 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         Assert.Equal(b.Attributes, a.Attributes);
         Assert.Equal(b.Length, a.Length);
     }
+
+    [Theory]
+    [InlineData("\"NaN\"")]
+    [InlineData("\"Infinity\"")]
+    [InlineData("-5")]
+    [InlineData("-0.1")]
+    [InlineData("256")]
+    [InlineData("255.5")]
+    [InlineData("4294967296")]
+    [InlineData("1000000000000000000000000000000")]
+    [InlineData("\"abc\"")]
+    public void W1_ColumnWidth_OutsideZeroTo255_OrNotANumber_Throws(string widthJson)
+    {
+        var workbook = Workbook(new JArray());
+        ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = new JArray(new JObject { ["Min"] = 1, ["Max"] = 1, ["Width"] = JToken.Parse(widthJson) });
+
+        Assert.Throws<ArgumentException>(() => Cells(workbook));
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("14.5")]
+    [InlineData("255")]
+    public void W1_ColumnWidth_InRange_IsWritten_AndValidatorClean(string widthJson)
+    {
+        var workbook = Workbook(new JArray(Row(Cell(null, "x"))));
+        ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = new JArray(new JObject { ["Min"] = 1, ["Max"] = 1, ["Width"] = JToken.Parse(widthJson) });
+        using var stream = new MemoryStream();
+        using var document = Write(workbook, stream);
+
+        var column = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Column>().Single();
+
+        Assert.Equal(double.Parse(widthJson, System.Globalization.CultureInfo.InvariantCulture), column.Width!.Value);
+        Assert.Empty(new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(document));
+    }
 }
