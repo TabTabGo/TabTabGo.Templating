@@ -259,4 +259,188 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             Assert.Throws<ArgumentException>(() => writer.CreateExcelDoc(new MemoryStream(), json));
         }
     }
+
+    private const string StyleXml = "<styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"/>";
+
+    private static bool TryLink(string link, string target, bool directory)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+            if (directory)
+            {
+                Directory.CreateSymbolicLink(link, target);
+            }
+            else
+            {
+                File.CreateSymbolicLink(link, target);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false; // the platform or account cannot create symbolic links
+        }
+    }
+
+    private void AssertRefused(string path)
+    {
+        var writer = new JsonSpreedSheet(new TemplatingOptions { StylesheetRoot = Path.Combine(_base, "root") });
+        var json = Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = path });
+
+        Assert.Throws<ArgumentException>(() => writer.CreateExcelDoc(new MemoryStream(), json));
+    }
+
+    [Fact]
+    public void S4_RelativeLinkChainThroughALinkBackToTheRoot_IsRefused()
+    {
+        // R/a/b/c/sub -> R, R/l2 -> ../secret.xml, R/l1 -> a/b/c/sub/l2: lexically inside R, physically the OS reads _base/secret.xml
+        var root = Path.Combine(_base, "root");
+        File.WriteAllText(Path.Combine(_base, "secret.xml"), StyleXml);
+        Directory.CreateDirectory(Path.Combine(root, "a", "b", "c"));
+        if (!TryLink(Path.Combine(root, "a", "b", "c", "sub"), root, directory: true)
+            || !TryLink(Path.Combine(root, "l2"), Path.Combine("..", "secret.xml"), directory: false)
+            || !TryLink(Path.Combine(root, "l1"), Path.Combine("a", "b", "c", "sub", "l2"), directory: false))
+        {
+            return;
+        }
+
+        AssertRefused("l1");
+    }
+
+    [Fact]
+    public void S4_RootLinkIntoAnotherDirectoryWhoseLinkClimbs_IsRefused()
+    {
+        // R/sub -> _base/outside/ct, _base/outside/ct/l2 -> ../secret.xml, R/l1 -> sub/l2
+        var root = Path.Combine(_base, "root");
+        Directory.CreateDirectory(Path.Combine(_base, "outside", "ct"));
+        File.WriteAllText(Path.Combine(_base, "outside", "secret.xml"), StyleXml);
+        if (!TryLink(Path.Combine(root, "sub"), Path.Combine(_base, "outside", "ct"), directory: true)
+            || !TryLink(Path.Combine(_base, "outside", "ct", "l2"), Path.Combine("..", "secret.xml"), directory: false)
+            || !TryLink(Path.Combine(root, "l1"), Path.Combine("sub", "l2"), directory: false))
+        {
+            return;
+        }
+
+        AssertRefused("l1");
+    }
+
+    [Fact]
+    public void S4_LinksThatStayInsideTheRoot_AreStillAccepted()
+    {
+        var root = Path.Combine(_base, "root");
+        File.WriteAllText(Path.Combine(root, "real.xml"), StyleXml);
+        Directory.CreateDirectory(Path.Combine(root, "d"));
+        if (!TryLink(Path.Combine(root, "d", "link.xml"), Path.Combine("..", "real.xml"), directory: false)
+            || !TryLink(Path.Combine(root, "dirlink"), Path.Combine(root, "d"), directory: true))
+        {
+            return;
+        }
+
+        var writer = new JsonSpreedSheet(new TemplatingOptions { StylesheetRoot = root });
+        foreach (var path in new[] { "d/link.xml", "dirlink/link.xml" })
+        {
+            using var stream = new MemoryStream();
+            writer.CreateExcelDoc(stream, Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = path }));
+            Assert.True(stream.Length > 0);
+        }
+    }
+
+    // ---- round 2: B1 empty cells, B2 sheet names, B3 style range, B4 no partial file
+
+    [Theory]
+    [InlineData("Number", "")]
+    [InlineData("Number", null)]
+    [InlineData("Boolean", "")]
+    [InlineData("Date", "")]
+    [InlineData("Date", null)]
+    [InlineData("Date", "not a date")]
+    public void B1_EmptyNumberBooleanOrDate_IsAnEmptyCell_WithItsStyle(string type, string? value)
+    {
+        var cell = Assert.Single(Cells(Workbook(new JArray(Row(new JObject { ["DataType"] = type, ["CellValue"] = value == null ? JValue.CreateNull() : value })))));
+
+        Assert.Null(cell.CellValue);
+        Assert.Null(cell.DataType);
+        Assert.Equal(0u, cell.StyleIndex!.Value);
+    }
+
+    [Theory]
+    [InlineData("'Report")]
+    [InlineData("Report'")]
+    [InlineData("History")]
+    [InlineData("hIsToRy")]
+    public void B2_ApostropheAndReservedNames_AreRefused(string name)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = name }))));
+    }
+
+    [Fact]
+    public void B2_NamesDifferingOnlyByCase_AreRefused_AndAnInnerApostropheIsFine()
+    {
+        var clash = new JArray(new JObject { ["SheetId"] = 1, ["Name"] = "Report" }, new JObject { ["SheetId"] = 2, ["Name"] = "REPORT" });
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), clash)));
+
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = "O'Brien" })), stream);
+        Assert.Equal("O'Brien", document.WorkbookPart!.Workbook!.Descendants<Sheet>().Single().Name!.Value);
+    }
+
+    [Theory]
+    [InlineData(6)]
+    [InlineData(99)]
+    public void B3_ExplicitStyleIndexOutOfRange_IsRefused_InTheGeneratedStylesheet(uint index)
+    {
+        var cell = Cell(null, "x");
+        cell["StyleIndex"] = index;
+
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(cell)))));
+    }
+
+    [Fact]
+    public void B3_ExplicitStyleIndex_IsCheckedAgainstALoadedStylesheet()
+    {
+        var writer = WriterWithStylesheet(2, out var stylesheets);
+        var inRange = Cell(null, "x");
+        inRange["StyleIndex"] = 1;
+        var outOfRange = Cell(null, "x");
+        outOfRange["StyleIndex"] = 2;
+
+        Assert.Equal(1u, Assert.Single(Cells(Workbook(new JArray(Row(inRange)), stylesheets: stylesheets), writer)).StyleIndex!.Value);
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(outOfRange)), stylesheets: stylesheets), writer));
+    }
+
+    [Theory]
+    [InlineData("error")]
+    [InlineData("stylesheet")]
+    [InlineData("sheets")]
+    [InlineData("styleindex")]
+    public void B4_FileOverload_LeavesNoFileBehind_WhenTheDefinitionFails(string failure)
+    {
+        var path = Path.Combine(_base, "out-" + failure + ".xlsx");
+        var json = failure switch
+        {
+            "error" => Workbook(new JArray(Row(Cell("Error", "oops")))),
+            "stylesheet" => Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = "../outside/none.xml" }),
+            "sheets" => Workbook(new JArray(), new JArray()),
+            _ => Workbook(new JArray(Row(new JObject { ["CellValue"] = "x", ["StyleIndex"] = 99 }))),
+        };
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet(new TemplatingOptions { StylesheetRoot = Path.Combine(_base, "root") }).CreateExcelDoc(path, json));
+
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void B4_FileOverload_StillWritesTheFile_OnSuccess()
+    {
+        var path = Path.Combine(_base, "ok.xlsx");
+
+        new JsonSpreedSheet().CreateExcelDoc(path, Workbook(new JArray(Row(Cell(null, "x")))));
+
+        using var document = SpreadsheetDocument.Open(path, false);
+        Assert.Single(document.WorkbookPart!.Workbook!.Descendants<Sheet>());
+    }
+
+
 }

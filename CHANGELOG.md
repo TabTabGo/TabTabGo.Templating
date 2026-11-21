@@ -11,6 +11,8 @@ JSON-workbook mode and booleans, no temp files.
 
 ### Fixed (fix round)
 - OpenXml JSON workbook: missing `$.StyleMap`, `InlineString`/`SharedString`/`Error` cells, invalid XML characters, sheet list and sheet name validation, duplicate sheet ids, default date style, style lookup by direct key comparison, stylesheet links outside `StylesheetRoot`.
+- Round 2: empty number/boolean/date cells are empty cells; sheet names are unique ignoring case and may not be `History` or start/end with an apostrophe; an out-of-range `StyleIndex` is refused; `CreateExcelDoc(fileName, ...)` leaves no file on failure; a stylesheet symbolic-link chain that leaves `StylesheetRoot` through another link is refused (links are resolved the way the OS does). v8's `EnhancedLocalFileSystem` does no link resolution at all, so it has no such chain check (not changed).
+- Known limitation, not fixed on v8: the JSON workbook mode still has the legacy shape (the generated stylesheet is empty, dates are written as culture text, and a missing `Columns`, `SheetId` or `BestFit` throws). Use v10 or v11 for a complete JSON workbook mode.
 - Include names no longer accept a trailing newline.
 - CI: the vulnerability gate fails closed; release tags accept ASCII digits without leading zeros only; `Version` and `TargetFramework` are read as XML.
 
