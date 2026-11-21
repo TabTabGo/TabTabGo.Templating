@@ -17,14 +17,30 @@ namespace TabTabGo.Templating.DotLiquid.Tests
         [Fact]
         public void LocalizedDateFormatFilterTest()
         {
-            var dotLiquidEngine = new Liquid.TemplatingEngine();
-            var jsonStr = File.ReadAllText(AppContext.BaseDirectory+"/../../../json/dateLocale.json");
-            var templatePath = AppContext.BaseDirectory + "/../../../liquids/dateLocale.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
+            // "Now" renders in UTC (decision F-10), so the clock is pinned to an instant whose UTC date differs from a UTC+4 local date, and the expectation is the UTC date
+            var instant = new DateTimeOffset(2026, 11, 21, 22, 30, 0, TimeSpan.Zero);
+            var previous = Liquid.Filters.ValueFilters.Clock;
+            Liquid.Filters.ValueFilters.Clock = new FixedClock(instant);
+            try
+            {
+                var dotLiquidEngine = new Liquid.TemplatingEngine();
+                var jsonStr = File.ReadAllText(AppContext.BaseDirectory+"/../../../json/dateLocale.json");
+                var templatePath = AppContext.BaseDirectory + "/../../../liquids/dateLocale.liquid";
+                dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
-            var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
-            var dateString = DateTime.Now.ToString("dd MMMM yyyy", new CultureInfo("ar-AE")) + "," + DateTime.Now.ToString("dd MMMM yyyy", CultureInfo.CurrentCulture);
-            Assert.Equal(dateString, renderedData);
+                var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
+                var dateString = instant.UtcDateTime.ToString("dd MMMM yyyy", new CultureInfo("ar-AE")) + "," + instant.UtcDateTime.ToString("dd MMMM yyyy", CultureInfo.CurrentCulture);
+                Assert.Equal(dateString, renderedData);
+            }
+            finally
+            {
+                Liquid.Filters.ValueFilters.Clock = previous;
+            }
+        }
+
+        private sealed class FixedClock(DateTimeOffset instant) : TimeProvider
+        {
+            public override DateTimeOffset GetUtcNow() => instant;
         }
 
         [Fact]

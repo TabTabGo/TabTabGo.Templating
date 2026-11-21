@@ -70,4 +70,63 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         var fs = new EnhancedLocalFileSystem(_root);
         Assert.Throws<FileSystemException>(() => fs.ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'nothere'"));
     }
+
+    private static bool TryLink(string link, string target, bool directory)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+            if (directory)
+            {
+                Directory.CreateSymbolicLink(link, target);
+            }
+            else
+            {
+                File.CreateSymbolicLink(link, target);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    [Fact]
+    public void ReadTemplateFile_RelativeLinkChainThroughALinkBackToTheRoot_IsRefused()
+    {
+        // _root/a/b/c/sub -> _root, _root/_l2.liquid -> ../secret.liquid, _root/_l1.liquid -> a/b/c/sub/_l2.liquid: lexically inside, physically outside
+        var parent = Path.GetDirectoryName(_root)!;
+        var secret = Path.Combine(parent, "secret-" + Guid.NewGuid().ToString("N") + ".liquid");
+        File.WriteAllText(secret, "SECRET");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c"));
+            if (!TryLink(Path.Combine(_root, "a", "b", "c", "sub"), _root, directory: true)
+                || !TryLink(Path.Combine(_root, "_l2.liquid"), Path.Combine("..", Path.GetFileName(secret)), directory: false)
+                || !TryLink(Path.Combine(_root, "_l1.liquid"), Path.Combine("a", "b", "c", "sub", "_l2.liquid"), directory: false))
+            {
+                return;
+            }
+
+            var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'l1'"));
+            Assert.DoesNotContain("SECRET", ex.Message);
+        }
+        finally
+        {
+            File.Delete(secret);
+        }
+    }
+
+    [Fact]
+    public void ReadTemplateFile_LinksThatStayInsideTheRoot_AreStillRead()
+    {
+        if (!TryLink(Path.Combine(_root, "sub", "_alias.liquid"), Path.Combine("..", "_part.liquid"), directory: false))
+        {
+            return;
+        }
+
+        Assert.Equal("root-part", new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'sub/alias'"));
+    }
 }

@@ -38,8 +38,12 @@ public class JsonSpreedSheet
     /// <param name="json">The workbook definition (<c>$.Workbook</c>).</param>
     public void CreateExcelDoc(string fileName, JObject json)
     {
-        using var file = new FileStream(fileName, FileMode.Create, FileAccess.ReadWrite);
-        CreateExcelDoc(file, json);
+        // build in memory first: a definition that fails (bad sheet, style, error literal, stylesheet path) must not leave a half-written or empty file behind
+        using var buffer = new MemoryStream();
+        CreateExcelDoc(buffer, json);
+        using var file = new FileStream(fileName, FileMode.Create, FileAccess.Write);
+        buffer.Position = 0;
+        buffer.CopyTo(file);
     }
 
     /// <summary>
@@ -53,7 +57,8 @@ public class JsonSpreedSheet
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(json);
 
-        // validate the sheet list before anything is written, so a bad definition never leaves a half-written package behind
+        // validate the sheet list before the package is created; failures later on (stylesheet, cell values) can still leave a partial stream, which is why the
+        // file overload builds in memory and writes the file only on success
         var jSheets = json.SelectToken("$.Workbook.Sheets")?.Children().ToList() ?? new List<JToken>();
         if (jSheets.Count == 0)
         {
@@ -61,7 +66,7 @@ public class JsonSpreedSheet
         }
 
         var sheetIds = ResolveSheetIds(jSheets);
-        var sheetNames = jSheets.Select((jSheet, i) => ValidateSheetName((string?)jSheet["Name"] ?? "Sheet" + (i + 1))).ToList();
+        var sheetNames = ResolveSheetNames(jSheets);
 
         using var document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
         var workbookPart = document.AddWorkbookPart();
@@ -70,16 +75,19 @@ public class JsonSpreedSheet
         var stylePart = workbookPart.AddNewPart<WorkbookStylesPart>();
         var styleToken = json.SelectToken("$.Workbook.Stylesheets");
         uint? defaultDateStyle;
+        uint styleCount;
         if (styleToken?["TemplatePath"] is { } templatePath)
         {
             stylePart.Stylesheet = new Stylesheet(LoadStylesheet(templatePath.ToString()).ToString());
 
             // index 5 means "date" only in the generated stylesheet; a loaded one keeps it only when it has that many formats
-            defaultDateStyle = stylePart.Stylesheet.CellFormats?.Elements<CellFormat>().Count() > DefaultDateStyleIndex ? DefaultDateStyleIndex : null;
+            styleCount = (uint)(stylePart.Stylesheet.CellFormats?.Elements<CellFormat>().Count() ?? 0);
+            defaultDateStyle = styleCount > DefaultDateStyleIndex ? DefaultDateStyleIndex : null;
         }
         else
         {
             stylePart.Stylesheet = GenerateStylesheet();
+            styleCount = (uint)stylePart.Stylesheet.CellFormats!.Elements<CellFormat>().Count();
             defaultDateStyle = DefaultDateStyleIndex;
         }
 
@@ -90,7 +98,7 @@ public class JsonSpreedSheet
         for (var i = 0; i < jSheets.Count; i++)
         {
             var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
-            worksheetPart.Worksheet = BuildWorksheet(json, styleMap, defaultDateStyle);
+            worksheetPart.Worksheet = BuildWorksheet(json, styleMap, defaultDateStyle, styleCount);
             worksheetPart.Worksheet.Save();
             sheets.Append(new Sheet
             {
@@ -139,19 +147,58 @@ public class JsonSpreedSheet
         return result;
     }
 
+    /// <summary>Explicit names are validated and must be unique ignoring case; a sheet without a name gets the first free "SheetN" from its position.</summary>
+    private static List<string> ResolveSheetNames(List<JToken> jSheets)
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new string?[jSheets.Count];
+        for (var i = 0; i < jSheets.Count; i++)
+        {
+            names[i] = (string?)jSheets[i]["Name"];
+            if (names[i] is { } explicitName && !used.Add(ValidateSheetName(explicitName)))
+            {
+                throw new ArgumentException($"The sheet name '{explicitName}' is used more than once (names are compared ignoring case).", "json");
+            }
+        }
+
+        var result = new List<string>(jSheets.Count);
+        for (var i = 0; i < names.Length; i++)
+        {
+            if (names[i] is { } known)
+            {
+                result.Add(known);
+                continue;
+            }
+
+            var number = i + 1;
+            while (!used.Add("Sheet" + number.ToString(CultureInfo.InvariantCulture)))
+            {
+                number++;
+            }
+
+            result.Add("Sheet" + number.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return result;
+    }
+
     private static string ValidateSheetName(string name)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxSheetNameLength || name.IndexOfAny(InvalidSheetNameChars) >= 0)
+        if (string.IsNullOrWhiteSpace(name)
+            || name.Length > MaxSheetNameLength
+            || name.IndexOfAny(InvalidSheetNameChars) >= 0
+            || name[0] == '\'' || name[^1] == '\''
+            || name.Equals("History", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                $"A sheet name must be 1 to {MaxSheetNameLength} characters and may not contain any of [ ] : * ? / \\.",
+                $"A sheet name must be 1 to {MaxSheetNameLength} characters, may not contain any of [ ] : * ? / \\, may not start or end with an apostrophe, and may not be 'History'.",
                 "json");
         }
 
         return name;
     }
 
-    private static Worksheet BuildWorksheet(JObject json, JArray styleMap, uint? defaultDateStyle)
+    private static Worksheet BuildWorksheet(JObject json, JArray styleMap, uint? defaultDateStyle, uint styleCount)
     {
         var worksheet = new Worksheet();
 
@@ -192,7 +239,7 @@ public class JsonSpreedSheet
                 var column = 0;
                 foreach (var jCell in cells)
                 {
-                    var cell = ConstructCell(jCell, styleMap, rowIndex, defaultDateStyle);
+                    var cell = ConstructCell(jCell, styleMap, rowIndex, defaultDateStyle, styleCount);
                     cell.CellReference = Utility.NextColumn(++column) + rowNumber.ToString(CultureInfo.InvariantCulture);
                     row.AppendChild(cell);
                 }
@@ -205,7 +252,7 @@ public class JsonSpreedSheet
         return worksheet;
     }
 
-    private static Cell ConstructCell(JToken jCell, JArray styleMap, int rowIndex, uint? defaultDateStyle)
+    private static Cell ConstructCell(JToken jCell, JArray styleMap, int rowIndex, uint? defaultDateStyle, uint styleCount)
     {
         var dataType = ParseDataType(jCell["DataType"]?.ToString());
         var alternative = rowIndex > 0 && rowIndex % 2 != 0;
@@ -215,9 +262,14 @@ public class JsonSpreedSheet
         if (dataType == CellValues.Date)
         {
             // a date is stored as an Excel serial number (a number cell with a date style), never as culture text (X-4)
-            cell.CellValue = new CellValue(DateSerial(value));
-            cell.DataType = new EnumValue<CellValues>(CellValues.Number);
-            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative);
+            var serial = DateSerial(value);
+            if (serial.Length > 0)
+            {
+                cell.CellValue = new CellValue(serial);
+                cell.DataType = new EnumValue<CellValues>(CellValues.Number);
+            }
+
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
             if (cell.StyleIndex.Value == 0 && defaultDateStyle is { } dateStyle)
             {
                 cell.StyleIndex = UInt32Value.FromUInt32(dateStyle);
@@ -237,7 +289,7 @@ public class JsonSpreedSheet
             // there is no shared-string table in this mode, so a shared string is written inline; an inline string needs its <is> element
             cell.DataType = new EnumValue<CellValues>(CellValues.InlineString);
             cell.InlineString = new InlineString(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
-            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative);
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
             return cell;
         }
 
@@ -246,9 +298,16 @@ public class JsonSpreedSheet
             throw new ArgumentException("An Error cell must hold one of #N/A, #REF!, #VALUE!, #DIV/0!, #NAME?, #NUM!, #NULL!.", "json");
         }
 
+        if (text.Length == 0 && (dataType == CellValues.Number || dataType == CellValues.Boolean))
+        {
+            // an empty number or boolean is an empty cell: <c t="n"><v/></c> is not valid (it keeps its style)
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
+            return cell;
+        }
+
         cell.CellValue = new CellValue(text);
         cell.DataType = new EnumValue<CellValues>(dataType);
-        cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative);
+        cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
         return cell;
     }
 
@@ -340,11 +399,17 @@ public class JsonSpreedSheet
         _ => CellValues.String,
     };
 
-    private static UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative)
+    private static UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative, uint styleCount)
     {
         if (jCell["StyleIndex"] != null)
         {
-            return UInt32Value.FromUInt32(Convert.ToUInt32(jCell["StyleIndex"], CultureInfo.InvariantCulture));
+            var explicitIndex = Convert.ToUInt32(jCell["StyleIndex"], CultureInfo.InvariantCulture);
+            if (explicitIndex >= Math.Max(styleCount, 1))
+            {
+                throw new ArgumentException($"StyleIndex {explicitIndex} is outside the stylesheet's {styleCount} cell formats.", "json");
+            }
+
+            return UInt32Value.FromUInt32(explicitIndex);
         }
 
         var format = jCell["Format"]?.ToString().Trim().Replace(" ", string.Empty);

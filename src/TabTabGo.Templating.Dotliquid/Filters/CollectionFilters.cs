@@ -95,7 +95,12 @@ public static class CollectionFilters
             return null;
         }
 
-        return array.Cast<Hash>().Where(FilterCriteriaGuard.Compile(criteria)).ToList();
+        var predicate = FilterCriteriaGuard.Compile(criteria);
+        return array.Cast<Hash>().Where(item =>
+        {
+            RenderBudget.ThrowIfCancelled(); // an expression is not interruptible, but the render time-out is honoured between rows
+            return predicate(item);
+        }).ToList();
     }
 
     /// <summary>

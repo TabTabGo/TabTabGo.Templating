@@ -9,8 +9,8 @@ namespace TabTabGo.Templating.Liquid.Internal;
 /// <summary>
 /// Guards the recursion of <c>Template.Parse</c> (S-13): DotLiquid's parser recurses once per nested block, so a few thousand nested <c>{% if %}</c> tags overflow the
 /// stack of the parsing thread and end the process. Two layers: a scan that counts block nesting over the very tokens DotLiquid parses (its own tokenizer, so
-/// <c>{{ ... }}</c> output tags, whitespace-control tags and shorthands split exactly as they do for the parser), and the parse itself on a thread with a large fixed
-/// stack, so that even a template the scan undercounts cannot take the process down.
+/// <c>{{ ... }}</c> output tags, whitespace-control tags and shorthands split exactly as they do for the parser), and the parse itself on a thread whose stack is sized from
+/// MaxNestingDepth (<see cref="ParseStackBytes"/>), which absorbs a small undercount only; the scan is the guard.
 /// </summary>
 internal static class TemplateNesting
 {
@@ -27,7 +27,7 @@ internal static class TemplateNesting
     // registered names are stable for the life of the process (a name may be registered later, never removed), so only positive answers are kept
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> KnownBlocks = new(StringComparer.Ordinal);
 
-    private static readonly Regex TagName = new(@"^\{%\s*(\w+)", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    private static readonly Regex TagName = new(@"^\{%-?\s*(\w+)", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // DotLiquid's own tokenizer is internal; calling it is what keeps the scan on the parser's token boundaries. The differential tests pin the pair.
     // Looked up lazily and defensively: a DotLiquid whose internal signature changed must degrade to the stock parse, not throw TypeInitializationException at first use.
@@ -124,7 +124,7 @@ internal static class TemplateNesting
                     failure = ex;
                 }
             },
-            ParseStackBytes(maxDepth));
+            StackFor(maxDepth, Tokenize.Value));
         thread.Start();
         thread.Join();
         if (failure != null)
@@ -135,7 +135,16 @@ internal static class TemplateNesting
         return parsed!;
     }
 
-    /// <summary>The reserved stack of the parse thread for a template limited to <paramref name="maxDepth"/> nested levels.</summary>
+    /// <summary>
+    /// The stack for one parse: the depth formula while DotLiquid's own tokenizer feeds the scan (it counts exactly what the parser recurses on), the 256 MB maximum
+    /// when the approximate fallback scan is in use, because that scan can undercount.
+    /// </summary>
+    /// <param name="maxDepth">The limit (at least 1).</param>
+    /// <param name="tokenizer">The bound DotLiquid tokenizer, or null when the fallback scan runs.</param>
+    internal static int StackFor(int maxDepth, Func<string, SyntaxCompatibility, List<string>>? tokenizer) =>
+        tokenizer == null ? ParseStackMaxBytes : ParseStackBytes(maxDepth);
+
+    /// <summary>The reserved stack of the parse thread for a template limited to <paramref name="maxDepth"/> nested levels (exact tokenizer).</summary>
     /// <param name="maxDepth">The limit (at least 1).</param>
     internal static int ParseStackBytes(int maxDepth) =>
         (int)Math.Min(ParseStackMaxBytes, ParseStackBaseBytes + (long)ParseStackBytesPerLevel * Math.Max(1, maxDepth));
@@ -242,7 +251,8 @@ internal static class TemplateNesting
 
     /// <summary>
     /// Splits <c>{% ... %}</c> and <c>{{ ... }}</c> in one linear pass, without DotLiquid's whitespace-control and shorthand rewriting. Good enough to count block nesting
-    /// (the stack reserve backs it up); it is only used when DotLiquid's own tokenizer cannot be bound.
+    /// (an undercounted template can still overflow the parse thread's stack, which is sized for MaxNestingDepth only); it is only used when DotLiquid's own tokenizer cannot be bound.
+    /// The tag-name pattern accepts the <c>{%-</c> whitespace-control form (DotLiquid has no <c>~</c> variant).
     /// </summary>
     /// <param name="template">The template text.</param>
     internal static List<string> FallbackTokens(string template)

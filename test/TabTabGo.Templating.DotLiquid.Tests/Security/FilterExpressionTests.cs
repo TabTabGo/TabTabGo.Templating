@@ -61,22 +61,17 @@ public class FilterExpressionTests
     }
 
     /// <summary>
-    /// FilterByPrefix compares ordinally; the dynamic expression's StartsWith(string) is culture-sensitive, so they
-    /// differ for characters ICU ignores (here a soft hyphen). Pinned so nobody assumes they are interchangeable.
+    /// S-3: the dynamic expression's StartsWith(string) used to be culture-sensitive (a soft hyphen was ignored); the guard rewrites it to ordinal, so Filter and
+    /// FilterByPrefix agree. A breaking change for templates that relied on ICU-ignorable characters.
     /// </summary>
     [Fact]
-    public void FilterByPrefix_IsOrdinal_WhileDynamicStartsWithIsCultureSensitive()
+    public void FilterStartsWith_IsOrdinal_LikeFilterByPrefix()
     {
         using var _ = new TabTabGo.Templating.DotLiquid.Tests.Support.CultureScope("en-US");
-        if (!"\u00ADAl".StartsWith("Al"))
-        {
-            return; // no ICU culture comparison available (invariant globalization): nothing to pin
-        }
+        var rows = new List<object> { new Hash { ["id"] = 1, ["name"] = "\u00ADAlice" }, new Hash { ["id"] = 2, ["name"] = "Alice" } };
 
-        var rows = new List<object> { new Hash { ["id"] = 1, ["name"] = "\u00ADAlice" } };
-
-        Assert.Equal("1", Ids(CollectionFilters.Filter(rows, "it[\"name\"].ToString().StartsWith(\"Al\")")));
-        Assert.Equal("", Ids(CollectionFilters.FilterByPrefix(rows, "name", "Al")));
+        Assert.Equal("2", Ids(CollectionFilters.Filter(rows, "it[\"name\"].ToString().StartsWith(\"Al\")")));
+        Assert.Equal("2", Ids(CollectionFilters.FilterByPrefix(rows, "name", "Al")));
     }
 
     [Fact]
