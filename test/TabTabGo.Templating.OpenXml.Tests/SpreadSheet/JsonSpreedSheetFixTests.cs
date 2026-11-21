@@ -856,8 +856,8 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             }
         }
 
-        var previous = GuardedRead.SpecialFileTimeout;
-        GuardedRead.SpecialFileTimeout = TimeSpan.FromMilliseconds(300);
+        var previous = GuardedRead.OpenTimeout;
+        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
         try
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -870,11 +870,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         }
         finally
         {
-            GuardedRead.SpecialFileTimeout = previous;
-            using (var release = new FileStream(fifo, FileMode.Open, FileAccess.Write))
-            {
-                // opening a writer lets the blocked reader thread finish
-            }
+            GuardedRead.OpenTimeout = previous;
         }
     }
 
@@ -941,5 +937,126 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
 
         Assert.Equal(1u, Assert.Single(Cells(Workbook(new JArray(Row(Cell(null, "h", "X"))), styleMap: inside, stylesheets: stylesheets), writer)).StyleIndex!.Value);
         Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell(null, "h", "X"))), styleMap: outside, stylesheets: stylesheets), writer));
+    }
+
+    private static bool TryMakeFifo(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        using var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", path) { RedirectStandardError = true });
+        make!.WaitForExit();
+        return make.ExitCode == 0;
+    }
+
+    [Fact]
+    public void G2_TwentyConcurrentReadsOfAFifo_AreAllPathFree_WithinTheTimeout_AndLeaveNoThreadsBehind()
+    {
+        var fifo = Path.Combine(_base, "root", "pipe.xml");
+        if (!TryMakeFifo(fifo))
+        {
+            return;
+        }
+
+        var previous = GuardedRead.OpenTimeout;
+        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var failures = new Exception[20];
+
+            System.Threading.Tasks.Parallel.For(0, 20, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 20 }, i => failures[i] = StylesheetFailure("pipe.xml"));
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
+            Assert.All(failures, ex =>
+            {
+                Assert.IsNotType<TimeoutException>(ex);
+                Assert.IsType<FileNotFoundException>(ex);
+                AssertPathFree(ex);
+            });
+        }
+        finally
+        {
+            GuardedRead.OpenTimeout = previous;
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((GuardedRead.StuckReaders > 0 || GuardedRead.LiveWorkers > 0) && DateTime.UtcNow < deadline)
+        {
+            System.Threading.Thread.Sleep(50);
+        }
+
+        Assert.Equal(0, GuardedRead.StuckReaders);
+        Assert.Equal(0, GuardedRead.LiveWorkers); // every worker thread has ended: none leaked per request
+    }
+
+    [Fact]
+    public void G1_ARegularFileSwappedForAFifoBetweenTheDecisionAndTheOpen_IsStillRefused()
+    {
+        var path = Path.Combine(_base, "root", "swap.xml");
+        File.WriteAllText(path, StyleXml);
+        if (!TryMakeFifo(Path.Combine(_base, "root", "swap.fifo")))
+        {
+            return;
+        }
+
+        var previousTimeout = GuardedRead.OpenTimeout;
+        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
+        GuardedRead.BeforeOpen = p =>
+        {
+            if (!p.EndsWith("swap.xml", StringComparison.Ordinal) && !p.EndsWith("_swap.liquid", StringComparison.Ordinal))
+            {
+                return; // other tests may read files while this hook is set
+            }
+
+            File.Delete(p);
+            File.Move(Path.Combine(_base, "root", "swap.fifo"), p);
+        };
+        try
+        {
+            var ex = StylesheetFailure("swap.xml");
+
+            Assert.IsType<FileNotFoundException>(ex);
+            AssertPathFree(ex);
+        }
+        finally
+        {
+            GuardedRead.BeforeOpen = null;
+            GuardedRead.OpenTimeout = previousTimeout;
+        }
+    }
+
+    [Fact]
+    public void G1_ARegularStylesheet_StillReadsCorrectlyAndFast()
+    {
+        File.WriteAllText(Path.Combine(_base, "root", "ok.xml"), StyleXml);
+        var writer = new JsonSpreedSheet(new TemplatingOptions { StylesheetRoot = Path.Combine(_base, "root") });
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        for (var i = 0; i < 50; i++)
+        {
+            using var stream = new MemoryStream();
+            writer.CreateExcelDoc(stream, Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = "ok.xml" }));
+            Assert.True(stream.Length > 0);
+        }
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public void G1_AFileOverTheSizeCap_IsRefusedPathFree()
+    {
+        var path = Path.Combine(_base, "root", "big.xml");
+        using (var big = new FileStream(path, FileMode.Create))
+        {
+            big.SetLength(GuardedRead.MaxBytes + 1);
+        }
+
+        var ex = StylesheetFailure("big.xml");
+
+        Assert.IsType<FileNotFoundException>(ex);
+        AssertPathFree(ex);
     }
 }
