@@ -79,17 +79,30 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var columns = new Columns();
             foreach (JToken jColumn in jColumns)
             {
+                var min = ReadWholeNumber(jColumn["Min"], "Column Min", 0, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+                var max = ReadWholeNumber(jColumn["Max"], "Column Max", 0, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+                if (min > max)
+                {
+                    throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
+                }
+
                 var column = new Column()
                 {
-                    Min = UInt32Value.FromUInt32((uint)jColumn["Min"]),
-                    Max = UInt32Value.FromUInt32((uint)jColumn["Max"]),
+                    Min = UInt32Value.FromUInt32(min),
+                    Max = UInt32Value.FromUInt32(max),
                     CustomWidth = false,
-                    BestFit = BooleanValue.FromBoolean((bool)jColumn["BestFit"]!)
+                    BestFit = BooleanValue.FromBoolean(ReadBoolean(jColumn["BestFit"], "Column BestFit"))
                 };
 
-                if (jColumn["Width"] != null)
+                if (jColumn["Width"] != null && jColumn["Width"].Type != JTokenType.Null)
                 {
-                    column.Width = DoubleValue.FromDouble((double)jColumn["Width"]!);
+                    var width = ReadDouble(jColumn["Width"], "Column Width");
+                    if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
+                    {
+                        throw new ArgumentException($"Column Width must be a number from 0 to 255 ({jColumn["Width"]}).", "json");
+                    }
+
+                    column.Width = DoubleValue.FromDouble(width);
                     column.CustomWidth = true;
                 }
 
@@ -122,7 +135,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var iRow = -1; // to ignore header
             foreach (JToken jRow in jRows)
             {
-                var row = new Row { Collapsed = Convert.ToBoolean(jRow["Collapsed"]) };
+                var row = new Row { Collapsed = ReadBoolean(jRow["Collapsed"], "Row Collapsed") };
                 var jCells = jRow.SelectToken("Cells");
 
                 if (jCells != null)
@@ -461,17 +474,28 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 return null;
             }
 
-            double number;
+            var number = ReadDouble(token, what);
+            if (!(number >= min && number <= max) || number != Math.Floor(number))
+            {
+                throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} to {max.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} ({token}).", "json");
+            }
+
+            return (uint)number;
+        }
+
+        private static double ReadDouble(JToken token, string what)
+        {
             try
             {
                 if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
                 {
                     var raw = ((JValue)token).Value;
-                    number = raw is System.Numerics.BigInteger big ? (double)big : Convert.ToDouble(raw, System.Globalization.CultureInfo.InvariantCulture); // above 2^63 the value is a BigInteger
+                    return raw is System.Numerics.BigInteger big ? (double)big : Convert.ToDouble(raw, System.Globalization.CultureInfo.InvariantCulture); // above 2^63 the value is a BigInteger
                 }
-                else if (token.Type != JTokenType.String || !double.TryParse(token.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out number))
+
+                if (token.Type == JTokenType.String && double.TryParse(token.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
                 {
-                    throw new ArgumentException($"{what} must be a number ({token}).", "json");
+                    return parsed;
                 }
             }
             catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
@@ -479,12 +503,33 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new ArgumentException($"{what} must be a number ({token}).", "json", ex);
             }
 
-            if (!(number >= min && number <= max) || number != Math.Floor(number))
+            throw new ArgumentException($"{what} must be a number ({token}).", "json");
+        }
+
+        private static bool ReadBoolean(JToken token, string what)
+        {
+            if (token == null || token.Type == JTokenType.Null)
             {
-                throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} to {max.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} ({token}).", "json");
+                return false;
             }
 
-            return (uint)number;
+            if (token is JValue value && value.Value is bool flag)
+            {
+                return flag;
+            }
+
+            var text = token.ToString().Trim().ToLowerInvariant();
+            if (text == "true" || text == "1")
+            {
+                return true;
+            }
+
+            if (text == "false" || text == "0")
+            {
+                return false;
+            }
+
+            throw new ArgumentException($"{what} must be true or false ({token}).", "json");
         }
 
         private static string ToValidXml(string s)

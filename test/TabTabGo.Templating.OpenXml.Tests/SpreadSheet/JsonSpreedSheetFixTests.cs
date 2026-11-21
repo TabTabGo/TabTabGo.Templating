@@ -847,4 +847,92 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         Assert.Equal(b.Attributes, a.Attributes);
         Assert.Equal(b.Length, a.Length);
     }
+
+    private const string HugeNumber = "1000000000000000000000000000000";
+
+    private static JObject WorkbookWithColumn(JObject column)
+    {
+        var workbook = Workbook(new JArray());
+        ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = new JArray(column);
+        return workbook;
+    }
+
+    [Theory]
+    [InlineData("Min", "-1")]
+    [InlineData("Min", "1.5")]
+    [InlineData("Min", "4294967296")]
+    [InlineData("Min", HugeNumber)]
+    [InlineData("Min", "\"abc\"")]
+    [InlineData("Max", "-1")]
+    [InlineData("Max", "2.5")]
+    [InlineData("Max", HugeNumber)]
+    [InlineData("Width", "\"NaN\"")]
+    [InlineData("Width", "\"Infinity\"")]
+    [InlineData("Width", "-5")]
+    [InlineData("Width", "256")]
+    [InlineData("Width", "4294967296")]
+    [InlineData("Width", HugeNumber)]
+    [InlineData("Width", "\"abc\"")]
+    [InlineData("BestFit", "\"abc\"")]
+    [InlineData("BestFit", "2")]
+    [InlineData("BestFit", HugeNumber)]
+    [InlineData("BestFit", "\"\"")]
+    public void W2_ColumnValues_ThatAreNotValid_ThrowArgumentException_AndNothingElse(string member, string valueJson)
+    {
+        var column = new JObject { ["Min"] = 1, ["Max"] = 2, ["BestFit"] = true, ["Width"] = 10 };
+        column[member] = JToken.Parse(valueJson);
+        var path = Path.Combine(_base, "w2-" + Guid.NewGuid().ToString("N") + ".xlsx");
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(path, WorkbookWithColumn(column))); // the file overload builds in memory: nothing is written on failure
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void W2_ColumnMinGreaterThanMax_IsRefused_AndMissingMinOrMaxIsAnArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject { ["Min"] = 3, ["Max"] = 2, ["BestFit"] = true })));
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject { ["Max"] = 2, ["BestFit"] = true })));
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject { ["Min"] = 1, ["BestFit"] = true })));
+    }
+
+    [Fact]
+    public void W2_ValidColumns_StillWork()
+    {
+        var column = new JObject { ["Min"] = "1", ["Max"] = 3.0, ["BestFit"] = "true", ["Width"] = 14.5 };
+        using var stream = new MemoryStream();
+        using var document = Write(WorkbookWithColumn(column), stream);
+
+        var written = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Column>().Single();
+
+        Assert.Equal(1u, written.Min!.Value);
+        Assert.Equal(3u, written.Max!.Value);
+        Assert.True(written.BestFit!.Value);
+        Assert.Equal(14.5, written.Width!.Value);
+    }
+
+    [Theory]
+    [InlineData("\"abc\"")]
+    [InlineData("2")]
+    [InlineData("-1")]
+    [InlineData("0.5")]
+    [InlineData(HugeNumber)]
+    [InlineData("\"\"")]
+    public void W2_RowCollapsed_ThatIsNotTrueFalseOneOrZero_ThrowsArgumentException(string valueJson)
+    {
+        var rows = new JArray(new JObject { ["Collapsed"] = JToken.Parse(valueJson) });
+
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(rows)));
+    }
+
+    [Fact]
+    public void W2_RowCollapsed_TrueFalseOneZero_AreAccepted()
+    {
+        var rows = new JArray(new JObject { ["Collapsed"] = true }, new JObject { ["Collapsed"] = "false" }, new JObject { ["Collapsed"] = 1 }, new JObject { ["Collapsed"] = 0 }, new JObject());
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(rows), stream);
+
+        var collapsed = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Row>().Select(r => r.Collapsed?.Value ?? false).ToArray();
+
+        Assert.Equal(new[] { true, false, true, false, false }, collapsed);
+    }
 }
