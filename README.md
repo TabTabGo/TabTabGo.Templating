@@ -59,6 +59,8 @@ dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.3 -o out
 
 ## Release notes 8.0.4
 
+**v8 does not confine symbolic links in the include folder: do not use it with a template directory that untrusted parties can write to.**
+
 **The v8 line has no render limits.** There is no iteration cap, no render time-out, no output cap, no nesting cap and no template size cap (`MaxIterations`, `RenderTimeout`, `MaxOutputCharacters`, `MaxNestingDepth` and `MaxTemplateCharacters` exist only on v10 and v11, and are not backported). Do not render templates from untrusted sources with a v8 package: a template can loop, allocate or nest without bound. Use v10 or v11 for that.
 
 Callers (e-mail and report services) must now catch `RegexMatchTimeoutException` from `Render`/`RenderString`: a catastrophic regex in

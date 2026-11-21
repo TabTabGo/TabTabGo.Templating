@@ -44,7 +44,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="json">The workbook definition (<c>$.Workbook</c>).</param>
         public void CreateExcelDoc(Stream stream, JObject json)
         {
-            ValidateSheets(json.SelectToken("$.Workbook.Sheets"));
+            var sheetIds = ValidateSheets(json.SelectToken("$.Workbook.Sheets"));
 
             using SpreadsheetDocument
                 document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
@@ -100,14 +100,15 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
             Sheets sheets = workbookPart.Workbook.AppendChild(new Sheets());
             var jSheets = json.SelectToken("$.Workbook.Sheets");
-            foreach (dynamic jSheet in jSheets)
+            var sheetIndex = 0;
+            foreach (var jSheet in jSheets.Children())
             {
                 sheets.Append(
                     new Sheet()
                     {
                         Id = workbookPart.GetIdOfPart(worksheetPart),
-                        SheetId = UInt32Value.FromUInt32((uint)jSheet.SheetId),
-                        Name = StringValue.FromString((string)jSheet.Name)
+                        SheetId = UInt32Value.FromUInt32(sheetIds[sheetIndex++]), // validated up front, never converted again here
+                        Name = StringValue.FromString((string)jSheet["Name"]!)
                     });
             }
 
@@ -176,7 +177,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 //  case CellValues.InlineString:
                 //  case CellValues.String:
                 // default:
-                var text = ToValidXml(jCell["CellValue"]?.ToString() ?? string.Empty);
+                var text = ToValidXml(InvariantText(jCell["CellValue"]));
                 if (dataType == CellValues.Boolean && !string.IsNullOrWhiteSpace(text))
                 {
                     // a boolean cell holds 1 or 0
@@ -340,7 +341,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             return UInt32Value.FromUInt32(0);
         }
 
-        private static void ValidateSheets(JToken? jSheets)
+        private static List<uint> ValidateSheets(JToken? jSheets)
         {
             var sheets = jSheets?.Children().ToList() ?? new List<JToken>();
             if (sheets.Count == 0)
@@ -354,6 +355,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
 
             var ids = new HashSet<uint>();
+            var idList = new List<uint>();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sheet in sheets)
             {
@@ -370,11 +372,29 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     throw new ArgumentException($"The sheet name '{name}' is used more than once (names are compared ignoring case).", "json");
                 }
 
-                if (ReadSheetId(sheet["SheetId"]) is { } id && !ids.Add(id))
+                var id = ReadSheetId(sheet["SheetId"]) ?? throw new ArgumentException("Every sheet needs a SheetId (a whole number from 1).", "json");
+                if (!ids.Add(id))
                 {
                     throw new ArgumentException($"SheetId {id} is used by more than one sheet.", "json");
                 }
+
+                idList.Add(id);
             }
+
+            return idList;
+        }
+
+        /// <summary>The cell value as text in the invariant culture: <c>JValue.ToString()</c> formats numbers with the thread culture, which writes "12,5" under de-DE.</summary>
+        private static string InvariantText(JToken? value)
+        {
+            if (value == null || value.Type == JTokenType.Null)
+            {
+                return string.Empty;
+            }
+
+            return value is JValue { Value: IFormattable formattable }
+                ? formattable.ToString(null, System.Globalization.CultureInfo.InvariantCulture)
+                : value.ToString();
         }
 
         private static bool HasControlOrLoneSurrogate(string name)
@@ -407,16 +427,24 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
 
             double number;
-            if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+            try
             {
-                number = Convert.ToDouble(((JValue)token).Value, System.Globalization.CultureInfo.InvariantCulture);
+                if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+                {
+                    var raw = ((JValue)token).Value;
+                    number = raw is System.Numerics.BigInteger big ? (double)big : Convert.ToDouble(raw, System.Globalization.CultureInfo.InvariantCulture); // above 2^63 the value is a BigInteger
+                }
+                else if (token.Type != JTokenType.String || !double.TryParse(token.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out number))
+                {
+                    throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+                }
             }
-            else if (token.Type != JTokenType.String || !double.TryParse(token.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out number))
+            catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
             {
-                throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+                throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json", ex);
             }
 
-            if (number < 1 || number > uint.MaxValue || number != Math.Floor(number))
+            if (!(number >= 1 && number <= uint.MaxValue) || number != Math.Floor(number))
             {
                 throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json");
             }

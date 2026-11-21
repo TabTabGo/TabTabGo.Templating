@@ -505,6 +505,10 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     [InlineData("-1")]
     [InlineData("\"abc\"")]
     [InlineData("true")]
+    [InlineData("9223372036854775808")]
+    [InlineData("123456789012345678901234567890")]
+    [InlineData("1e300")]
+    [InlineData("[]")]
     public void N3_InvalidSheetId_Throws(string idJson)
     {
         var sheets = new JArray(new JObject { ["SheetId"] = JToken.Parse(idJson), ["Name"] = "A" });
@@ -520,5 +524,44 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
 
         Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), Sheets(256))));
         Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public void M33_NumericTextSheetId_IsWrittenAsTheValidatedNumber_NotConvertedAgain()
+    {
+        var sheets = new JArray(new JObject { ["SheetId"] = "1e0", ["Name"] = "A" }, new JObject { ["SheetId"] = "4", ["Name"] = "B" });
+        using var stream = new MemoryStream();
+
+        using var document = Write(Workbook(new JArray(), sheets), stream);
+
+        Assert.Equal(new[] { 1u, 4u }, document.WorkbookPart!.Workbook!.Descendants<Sheet>().Select(x => x.SheetId!.Value));
+    }
+
+    [Fact]
+    public void M33_MissingSheetId_IsAnArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), new JArray(new JObject { ["Name"] = "A" }))));
+    }
+
+    [Theory]
+    [InlineData("de-DE")]
+    [InlineData("tr-TR")]
+    [InlineData("ar-SA")]
+    [InlineData("fa-IR")]
+    public void M32_NumberCells_AreFormattedAndParsedInvariantly_UnderAnyThreadCulture(string culture)
+    {
+        var previous = System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo(culture);
+        try
+        {
+            var cells = Cells(Workbook(new JArray(Row(Cell("Number", 12.5m), Cell("Number", 12.5), Cell("Number", "12.5"), Cell("Number", 1234567.25), Cell("Number", -0.125m)))));
+
+            Assert.Equal(new[] { "12.5", "12.5", "12.5", "1234567.25", "-0.125" }, cells.Select(c => c.CellValue!.Text));
+            Assert.All(cells, c => Assert.Equal(CellValues.Number, c.DataType!.Value));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previous;
+        }
     }
 }
