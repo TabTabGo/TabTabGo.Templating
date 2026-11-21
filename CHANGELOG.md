@@ -26,6 +26,15 @@ mode, no temp files). No public API of 8.0.4 was removed or changed.
 - B-3..B-6, B-9 (engine state, null/list data, culture, object-typed members); S-6, S-10..S-12 (paths, limits, links); F-1..F-15 (filters); F-16, F-17 (configuration);
   X-4..X-21 (workbooks), B-7 (parallel workbooks); P-7 (nullability, `-warnaserror` clean).
 
+### Fixed (fix round after the diff and security review)
+- OpenXml JSON workbook: a missing `$.StyleMap` no longer writes every row empty; `InlineString` writes its `<is>` element, `SharedString` is written inline, `Error` cells accept only Excel error literals; invalid XML characters are removed from cell text;
+  an empty `Workbook.Sheets`, an invalid sheet name and a duplicate or colliding sheet id throw `ArgumentException`; the date default style 5 applies only to the generated stylesheet (or a loaded one with more than five formats); the style lookup compares keys directly
+  (no JSONPath filter built from data); a stylesheet reached through a symbolic link outside `StylesheetRoot` is refused.
+- `Filter` (dynamic LINQ) refuses `PadLeft`, `PadRight`, `Replace`, `Repeat`, `Insert`, `Concat`, `Join`, `Format` and method arguments above 10 000, which allocated outside `MaxOutputCharacters`.
+- The parse thread reserves 512 KB plus 8 KB per allowed nesting level (1 312 KB by default) instead of 256 MB; a DotLiquid without the internal tokenizer falls back to the stock parse instead of `TypeInitializationException`.
+- The template cache is keyed by `MaxNestingDepth` as well and sweeps stale entries only when a new entry is added; partial names no longer accept a trailing newline.
+- CI: the vulnerability gate fails closed (any `problems`, no projects, no sources, an empty `frameworks`); `NU1900` is an error; release tags accept ASCII digits without leading zeros only; `Version` and `TargetFramework` are read as XML.
+
 ### Removed
 - Dependencies on `TabTabGo.IO.Utilities` and `Common.Logging.Core`; `Newtonsoft.Json` from the base package.
 

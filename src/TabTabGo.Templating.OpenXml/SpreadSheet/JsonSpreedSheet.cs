@@ -4,6 +4,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Newtonsoft.Json.Linq;
+using TabTabGo.Templating.OpenXml.SpreadSheet.Internal;
 
 namespace TabTabGo.Templating.OpenXml.SpreadSheet;
 
@@ -12,6 +13,10 @@ public class JsonSpreedSheet
 {
     /// <summary>The style index the generated stylesheet gives to dates, and the index date cells use when the JSON names none.</summary>
     internal const uint DefaultDateStyleIndex = 5;
+
+    private const int MaxSheetNameLength = 31;
+    private static readonly char[] InvalidSheetNameChars = { '[', ']', ':', '*', '?', '/', '\\' };
+    private static readonly string[] ErrorLiterals = { "#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!" };
 
     private readonly TemplatingOptions _options;
 
@@ -48,43 +53,105 @@ public class JsonSpreedSheet
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(json);
 
+        // validate the sheet list before anything is written, so a bad definition never leaves a half-written package behind
+        var jSheets = json.SelectToken("$.Workbook.Sheets")?.Children().ToList() ?? new List<JToken>();
+        if (jSheets.Count == 0)
+        {
+            throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", nameof(json));
+        }
+
+        var sheetIds = ResolveSheetIds(jSheets);
+        var sheetNames = jSheets.Select((jSheet, i) => ValidateSheetName((string?)jSheet["Name"] ?? "Sheet" + (i + 1))).ToList();
+
         using var document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
         var workbookPart = document.AddWorkbookPart();
         workbookPart.Workbook = new Workbook();
 
         var stylePart = workbookPart.AddNewPart<WorkbookStylesPart>();
         var styleToken = json.SelectToken("$.Workbook.Stylesheets");
+        uint? defaultDateStyle;
         if (styleToken?["TemplatePath"] is { } templatePath)
         {
             stylePart.Stylesheet = new Stylesheet(LoadStylesheet(templatePath.ToString()).ToString());
+
+            // index 5 means "date" only in the generated stylesheet; a loaded one keeps it only when it has that many formats
+            defaultDateStyle = stylePart.Stylesheet.CellFormats?.Elements<CellFormat>().Count() > DefaultDateStyleIndex ? DefaultDateStyleIndex : null;
         }
         else
         {
             stylePart.Stylesheet = GenerateStylesheet();
+            defaultDateStyle = DefaultDateStyleIndex;
         }
 
         stylePart.Stylesheet.Save();
 
         var sheets = workbookPart.Workbook.AppendChild(new Sheets());
-        var jSheets = json.SelectToken("$.Workbook.Sheets")?.Children().ToList() ?? new List<JToken>();
-        var styleMap = json.SelectToken("$.StyleMap");
-        foreach (var jSheet in jSheets)
+        var styleMap = json.SelectToken("$.StyleMap") as JArray ?? new JArray(); // no StyleMap means every cell uses style 0, not "write no cells"
+        for (var i = 0; i < jSheets.Count; i++)
         {
             var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
-            worksheetPart.Worksheet = BuildWorksheet(json, styleMap);
+            worksheetPart.Worksheet = BuildWorksheet(json, styleMap, defaultDateStyle);
             worksheetPart.Worksheet.Save();
             sheets.Append(new Sheet
             {
                 Id = workbookPart.GetIdOfPart(worksheetPart),
-                SheetId = UInt32Value.FromUInt32((uint?)jSheet["SheetId"] ?? (uint)(sheets.ChildElements.Count + 1)),
-                Name = StringValue.FromString((string?)jSheet["Name"] ?? "Sheet" + (sheets.ChildElements.Count + 1)),
+                SheetId = UInt32Value.FromUInt32(sheetIds[i]),
+                Name = StringValue.FromString(sheetNames[i]),
             });
         }
 
         workbookPart.Workbook.Save();
     }
 
-    private static Worksheet BuildWorksheet(JObject json, JToken? styleMap)
+    /// <summary>Explicit ids are kept (and must be unique); generated ids skip every explicit one so they never collide.</summary>
+    private static List<uint> ResolveSheetIds(List<JToken> jSheets)
+    {
+        var used = new HashSet<uint>();
+        var ids = new uint?[jSheets.Count];
+        for (var i = 0; i < jSheets.Count; i++)
+        {
+            ids[i] = (uint?)jSheets[i]["SheetId"];
+            if (ids[i] is { } explicitId && !used.Add(explicitId))
+            {
+                throw new ArgumentException($"SheetId {explicitId} is used by more than one sheet.", "json");
+            }
+        }
+
+        var result = new List<uint>(jSheets.Count);
+        for (var i = 0; i < ids.Length; i++)
+        {
+            if (ids[i] is { } known)
+            {
+                result.Add(known);
+                continue;
+            }
+
+            var next = (uint)(i + 1); // the sheet's position, moved up past every id already taken
+            while (used.Contains(next))
+            {
+                next++;
+            }
+
+            used.Add(next);
+            result.Add(next);
+        }
+
+        return result;
+    }
+
+    private static string ValidateSheetName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > MaxSheetNameLength || name.IndexOfAny(InvalidSheetNameChars) >= 0)
+        {
+            throw new ArgumentException(
+                $"A sheet name must be 1 to {MaxSheetNameLength} characters and may not contain any of [ ] : * ? / \\.",
+                "json");
+        }
+
+        return name;
+    }
+
+    private static Worksheet BuildWorksheet(JObject json, JArray styleMap, uint? defaultDateStyle)
     {
         var worksheet = new Worksheet();
 
@@ -120,12 +187,12 @@ public class JsonSpreedSheet
         {
             rowNumber++;
             var row = new Row { RowIndex = rowNumber, Collapsed = Convert.ToBoolean(jRow["Collapsed"], CultureInfo.InvariantCulture) };
-            if (jRow.SelectToken("Cells") is { } cells && styleMap != null)
+            if (jRow.SelectToken("Cells") is { } cells)
             {
                 var column = 0;
                 foreach (var jCell in cells)
                 {
-                    var cell = ConstructCell(jCell, styleMap, rowIndex);
+                    var cell = ConstructCell(jCell, styleMap, rowIndex, defaultDateStyle);
                     cell.CellReference = Utility.NextColumn(++column) + rowNumber.ToString(CultureInfo.InvariantCulture);
                     row.AppendChild(cell);
                 }
@@ -138,7 +205,7 @@ public class JsonSpreedSheet
         return worksheet;
     }
 
-    private static Cell ConstructCell(JToken jCell, JToken styleMap, int rowIndex)
+    private static Cell ConstructCell(JToken jCell, JArray styleMap, int rowIndex, uint? defaultDateStyle)
     {
         var dataType = ParseDataType(jCell["DataType"]?.ToString());
         var alternative = rowIndex > 0 && rowIndex % 2 != 0;
@@ -151,18 +218,32 @@ public class JsonSpreedSheet
             cell.CellValue = new CellValue(DateSerial(value));
             cell.DataType = new EnumValue<CellValues>(CellValues.Number);
             cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative);
-            if (cell.StyleIndex.Value == 0)
+            if (cell.StyleIndex.Value == 0 && defaultDateStyle is { } dateStyle)
             {
-                cell.StyleIndex = UInt32Value.FromUInt32(DefaultDateStyleIndex);
+                cell.StyleIndex = UInt32Value.FromUInt32(dateStyle);
             }
 
             return cell;
         }
 
-        var text = value is JValue { Value: null } or null ? string.Empty : Invariant(value);
+        var text = CellValueWriter.ToValidXml(value is JValue { Value: null } or null ? string.Empty : Invariant(value));
         if (dataType == CellValues.Boolean)
         {
             text = bool.TryParse(text, out var flag) ? (flag ? "1" : "0") : text; // a boolean cell holds 1 or 0
+        }
+
+        if (dataType == CellValues.InlineString || dataType == CellValues.SharedString)
+        {
+            // there is no shared-string table in this mode, so a shared string is written inline; an inline string needs its <is> element
+            cell.DataType = new EnumValue<CellValues>(CellValues.InlineString);
+            cell.InlineString = new InlineString(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative);
+            return cell;
+        }
+
+        if (dataType == CellValues.Error && Array.IndexOf(ErrorLiterals, text) < 0)
+        {
+            throw new ArgumentException("An Error cell must hold one of #N/A, #REF!, #VALUE!, #DIV/0!, #NAME?, #NUM!, #NULL!.", "json");
         }
 
         cell.CellValue = new CellValue(text);
@@ -228,6 +309,12 @@ public class JsonSpreedSheet
             throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
         }
 
+        // a symbolic link inside the root may point outside it: compare the real paths
+        if (!RealPath.IsInside(root, full))
+        {
+            throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
+        }
+
         var settings = new System.Xml.XmlReaderSettings
         {
             DtdProcessing = System.Xml.DtdProcessing.Prohibit,
@@ -253,7 +340,7 @@ public class JsonSpreedSheet
         _ => CellValues.String,
     };
 
-    private static UInt32Value GetStyleIndex(JToken jCell, JToken styleMap, bool useAlternative)
+    private static UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative)
     {
         if (jCell["StyleIndex"] != null)
         {
@@ -266,8 +353,9 @@ public class JsonSpreedSheet
             format = "Normal";
         }
 
-        var map = styleMap.SelectToken($"[?(@.Key == '{format.Replace("'", "\\'")}')]");
-        if (map != null && map["Key"]?.ToString() == format)
+        // compare the key directly: a JSONPath filter built from data breaks on a quote or a trailing backslash in the format
+        var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
+        if (map != null)
         {
             if (useAlternative && map["SAlternativeIndex"] != null)
             {

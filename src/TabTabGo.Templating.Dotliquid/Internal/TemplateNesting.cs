@@ -14,7 +14,12 @@ namespace TabTabGo.Templating.Liquid.Internal;
 /// </summary>
 internal static class TemplateNesting
 {
-    private const int ParseStackBytes = 256 * 1024 * 1024; // reserved, committed only as used; room for one million characters of nested tags
+    // The parse thread's reserved stack. Measured (DotLiquid 2.3.260, Release and Debug, if/for/capture/case): the recursive parse needs about 0.6 KB per nested level
+    // (529-609 KB at 1,000 levels, 1.6-1.9 MB at 3,000) and fits 100 levels in 64 KB. The stack is 512 KB plus 8 KB per allowed level, about 13 times the measured need
+    // (default MaxNestingDepth 100 reserves 1,312 KB), because the scan is the guard and the stack only backs it up. It was a fixed 256 MB per render.
+    private const int ParseStackBaseBytes = 512 * 1024;
+    private const int ParseStackBytesPerLevel = 8 * 1024;
+    private const int ParseStackMaxBytes = 256 * 1024 * 1024;
 
     // tags that continue a block instead of opening one; answered without asking DotLiquid (it throws for a name it does not register, which is slow in a loop)
     private static readonly HashSet<string> Continuations = new(StringComparer.Ordinal) { "else", "elsif", "elseif", "when", "break", "continue" };
@@ -25,15 +30,40 @@ internal static class TemplateNesting
     private static readonly Regex TagName = new(@"^\{%\s*(\w+)", RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     // DotLiquid's own tokenizer is internal; calling it is what keeps the scan on the parser's token boundaries. The differential tests pin the pair.
-    private static readonly Func<string, SyntaxCompatibility, List<string>> Tokenize = (Func<string, SyntaxCompatibility, List<string>>)Delegate.CreateDelegate(
-        typeof(Func<string, SyntaxCompatibility, List<string>>),
-        typeof(Template).Assembly.GetType("DotLiquid.Tokenizer", throwOnError: true)!.GetMethod("Tokenize", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)!);
+    // Looked up lazily and defensively: a DotLiquid whose internal signature changed must degrade to the stock parse, not throw TypeInitializationException at first use.
+    private static readonly Lazy<Func<string, SyntaxCompatibility, List<string>>?> Tokenize = new(
+        () => CreateTokenizer(typeof(Template).Assembly.GetType("DotLiquid.Tokenizer", throwOnError: false)),
+        LazyThreadSafetyMode.PublicationOnly);
+
+    /// <summary>Binds <paramref name="tokenizerType"/>'s static <c>Tokenize(string, SyntaxCompatibility)</c>, or returns null when the type or the method has another shape.</summary>
+    /// <param name="tokenizerType">DotLiquid's tokenizer type, or null when it was not found.</param>
+    /// <param name="methodName">The method name.</param>
+    internal static Func<string, SyntaxCompatibility, List<string>>? CreateTokenizer(Type? tokenizerType, string methodName = "Tokenize")
+    {
+        try
+        {
+            var method = tokenizerType?.GetMethod(
+                methodName,
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                types: new[] { typeof(string), typeof(SyntaxCompatibility) },
+                modifiers: null);
+            return method == null
+                ? null
+                : (Func<string, SyntaxCompatibility, List<string>>?)Delegate.CreateDelegate(typeof(Func<string, SyntaxCompatibility, List<string>>), method, throwOnBindFailure: false);
+        }
+        catch (Exception ex) when (ex is AmbiguousMatchException or System.ArgumentException or MethodAccessException or MissingMethodException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>Parses <paramref name="template"/> after refusing blocks nested deeper than <paramref name="maxDepth"/>, on a thread with a large stack.</summary>
     /// <param name="template">The template text.</param>
     /// <param name="maxDepth">The limit (at least 1).</param>
     /// <exception cref="SyntaxException">The template nests blocks too deeply, or DotLiquid rejects its syntax.</exception>
-    public static Template Parse(string template, int maxDepth) => Parse(template, maxDepth, SharedTokenParseSupported(typeof(Template).Assembly.GetName().Version));
+    public static Template Parse(string template, int maxDepth) =>
+        Parse(template, maxDepth, SharedTokenParseSupported(typeof(Template).Assembly.GetName().Version) && Tokenize.Value != null);
 
     /// <summary>True when the last <see cref="Parse(string, int, bool)"/> on this thread took the shared-token path (tests pin that the public overload asks the gate).</summary>
     [ThreadStatic]
@@ -94,7 +124,7 @@ internal static class TemplateNesting
                     failure = ex;
                 }
             },
-            ParseStackBytes);
+            ParseStackBytes(maxDepth));
         thread.Start();
         thread.Join();
         if (failure != null)
@@ -104,6 +134,11 @@ internal static class TemplateNesting
 
         return parsed!;
     }
+
+    /// <summary>The reserved stack of the parse thread for a template limited to <paramref name="maxDepth"/> nested levels.</summary>
+    /// <param name="maxDepth">The limit (at least 1).</param>
+    internal static int ParseStackBytes(int maxDepth) =>
+        (int)Math.Min(ParseStackMaxBytes, ParseStackBaseBytes + (long)ParseStackBytesPerLevel * Math.Max(1, maxDepth));
 
     /// <summary>True only for DotLiquid 2.3.260, the version whose <c>Template.Parse</c> the shared-token parse was verified against.</summary>
     /// <param name="version">The loaded DotLiquid assembly version.</param>
@@ -129,7 +164,7 @@ internal static class TemplateNesting
     /// <param name="stopAfter">Depth at which to stop counting.</param>
     internal static int Depth(string template, int stopAfter = int.MaxValue) => Depth(Tokens(template), stopAfter);
 
-    /// <summary>The scan over tokens already produced by <see cref="Tokens"/>.</summary>
+    /// <summary>The scan over tokens already produced by <see cref="Tokens(string)"/>.</summary>
     /// <param name="tokens">The tokens.</param>
     /// <param name="stopAfter">Depth at which to stop counting.</param>
     internal static int Depth(List<string> tokens, int stopAfter)
@@ -197,7 +232,50 @@ internal static class TemplateNesting
     }
 
     /// <summary>The tokens <c>Template.Parse</c> would parse (its cost, superlinear in the token count, is DotLiquid's own).</summary>
-    internal static List<string> Tokens(string template) => Tokenize(template, Template.DefaultSyntaxCompatibilityLevel);
+    internal static List<string> Tokens(string template) => Tokens(template, Tokenize.Value);
+
+    /// <summary>The tokens from <paramref name="tokenizer"/>, or from the built-in approximation when it is null (DotLiquid's internal tokenizer was not found).</summary>
+    /// <param name="template">The template text.</param>
+    /// <param name="tokenizer">DotLiquid's tokenizer, or null.</param>
+    internal static List<string> Tokens(string template, Func<string, SyntaxCompatibility, List<string>>? tokenizer) =>
+        tokenizer != null ? tokenizer(template, Template.DefaultSyntaxCompatibilityLevel) : FallbackTokens(template);
+
+    /// <summary>
+    /// Splits <c>{% ... %}</c> and <c>{{ ... }}</c> in one linear pass, without DotLiquid's whitespace-control and shorthand rewriting. Good enough to count block nesting
+    /// (the stack reserve backs it up); it is only used when DotLiquid's own tokenizer cannot be bound.
+    /// </summary>
+    /// <param name="template">The template text.</param>
+    internal static List<string> FallbackTokens(string template)
+    {
+        var tokens = new List<string>();
+        var i = 0;
+        while (i < template.Length - 1)
+        {
+            var open = template.IndexOf('{', i);
+            if (open < 0 || open >= template.Length - 1)
+            {
+                break;
+            }
+
+            var kind = template[open + 1];
+            if (kind is not ('%' or '{'))
+            {
+                i = open + 1;
+                continue;
+            }
+
+            var end = template.IndexOf(kind == '%' ? "%}" : "}}", open + 2, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                break;
+            }
+
+            tokens.Add(template.Substring(open, end + 2 - open));
+            i = end + 2;
+        }
+
+        return tokens;
+    }
 
     /// <summary>Calls made to DotLiquid's tag registry by the scan (tests assert it stays at one per distinct name).</summary>
     internal static long RegistryLookups => Interlocked.Read(ref _registryLookups);

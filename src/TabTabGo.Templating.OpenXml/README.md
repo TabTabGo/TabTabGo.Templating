@@ -45,10 +45,16 @@ Characters that are not valid XML 1.0 are removed; emoji and other supplementary
 
 `Render("", data)` with `data.Workbook` describing sheets, columns and styles generates a workbook from scratch (`JsonSpreedSheet`). Every entry of `Workbook.Sheets` becomes a sheet that
 uses the single `Workbook.Worksheet` definition. Cell `DataType` is one of `String`, `Number`, `Boolean`, `Date`, `Error`, `SharedString`, `InlineString` (unknown names become `String`);
-dates are serial numbers with a date style. Without `Workbook.Stylesheets` a minimal valid stylesheet is generated (style index 5 is a date).
+dates are serial numbers with a date style. Without `Workbook.Stylesheets` a minimal valid stylesheet is generated (style index 5 is a date); a date cell with no style gets index 5 only
+then, or when a loaded stylesheet has more than five cell formats. A missing `$.StyleMap` is an empty map (every cell uses style 0). `InlineString` is written as an inline string; `SharedString`
+is written inline too (this mode has no shared-string table); an `Error` cell must hold one of `#N/A`, `#REF!`, `#VALUE!`, `#DIV/0!`, `#NAME?`, `#NUM!`, `#NULL!`, or `ArgumentException` is thrown. Characters invalid in XML 1.0 are removed.
+`Workbook.Sheets` must not be empty, a sheet name is 1 to 31 characters without `[ ] : * ? / \`, and sheet ids are unique (a generated id skips every explicit one); otherwise `ArgumentException`.
 
 A workbook may name a stylesheet (`Workbook.Stylesheets.TemplatePath`). The path must be relative and stay inside `TemplatingOptions.StylesheetRoot` (a relative root is resolved against the
-application base directory, which is also the default; `TemplatesPath` is never used); rooted, UNC and `..` paths fail with `ArgumentException`, and the XML must not contain a DOCTYPE.
+application base directory, which is also the default; `TemplatesPath` is never used); rooted, UNC and `..` paths fail with `ArgumentException`, a symbolic link that leads outside the root is refused, and the XML must not contain a DOCTYPE.
+
+**The default `StylesheetRoot` is `AppContext.BaseDirectory`** (the application folder), so any `.xml` file deployed there can be named as a stylesheet. A host that renders workbook JSON built from untrusted data should set
+`TemplatingOptions.StylesheetRoot` to a dedicated folder that holds only stylesheets.
 
 ## Limitations
 

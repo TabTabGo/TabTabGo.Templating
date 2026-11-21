@@ -17,7 +17,7 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
 {
     private static readonly object InitLock = new();
     private static volatile bool _isInitialized;
-    private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>> TemplateCache = new();
+    private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc, int MaxNestingDepth), Lazy<Template>> TemplateCache = new();
     private static long _parseCount;
 
     private readonly TemplatingOptions _options;
@@ -96,7 +96,7 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
 
         var fullPath = Path.GetFullPath(templatePath);
         return File.Exists(fullPath)
-            && TemplateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath)), out var cached)
+            && TemplateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath), _options.MaxNestingDepth), out var cached)
             && cached.IsValueCreated;
     }
 
@@ -217,15 +217,19 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
             return (ParseFile(fullPath), fullPath);
         }
 
-        // Keyed by full path and last write time: an edited file is parsed again, and relative and absolute spellings of one path
-        // share an entry (B-2).
+        // Keyed by full path, last write time and MaxNestingDepth: an edited file is parsed again, relative and absolute spellings of one path
+        // share an entry (B-2), and an engine with a smaller depth limit never receives a template another engine parsed under a larger one.
         var lastWrite = File.GetLastWriteTimeUtc(fullPath);
-        var key = (fullPath, lastWrite);
-        var entry = TemplateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path), LazyThreadSafetyMode.ExecutionAndPublication));
-
-        foreach (var stale in TemplateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
+        var key = (fullPath, lastWrite, _options.MaxNestingDepth);
+        if (!TemplateCache.TryGetValue(key, out var entry))
         {
-            TemplateCache.TryRemove(stale, out _);
+            entry = TemplateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path), LazyThreadSafetyMode.ExecutionAndPublication));
+
+            // drop the entries of older versions of this file, only when a new entry was needed (a cache hit does no sweep)
+            foreach (var stale in TemplateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
+            {
+                TemplateCache.TryRemove(stale, out _);
+            }
         }
 
         try

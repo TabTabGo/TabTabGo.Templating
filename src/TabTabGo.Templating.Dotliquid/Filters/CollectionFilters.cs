@@ -95,13 +95,18 @@ public static class CollectionFilters
 
     /// <summary>Keeps the items that satisfy a System.Linq.Dynamic.Core expression (<c>it["k"].ToString() = "v"</c>).</summary>
     /// <param name="array">The list of hashes.</param>
-    /// <param name="criteria">The expression. Do not build it from untrusted data; prefer <see cref="FilterBy"/>.</param>
+    /// <param name="criteria">The expression. Do not build it from untrusted data; prefer <see cref="FilterBy"/>. It may not call
+    /// <c>PadLeft</c>, <c>PadRight</c>, <c>Replace</c>, <c>Repeat</c>, <c>Insert</c>, <c>Concat</c>, <c>Join</c> or <c>Format</c>, and no method may be
+    /// given a number above 10,000: those allocate outside the output limit.</param>
+    /// <exception cref="ArgumentException">The expression calls a blocked method or passes a number above the cap.</exception>
     public static object? Filter(IEnumerable? array, string criteria)
     {
         if (array == null)
         {
             return null;
         }
+
+        FilterCriteriaGuard.Validate(criteria);
 
         return array.Cast<Hash>().AsQueryable().Where(DynamicLinqParsingConfig, criteria).ToList();
     }

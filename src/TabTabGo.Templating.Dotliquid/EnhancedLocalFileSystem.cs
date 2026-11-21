@@ -12,7 +12,7 @@ namespace TabTabGo.Templating.Liquid;
 /// </summary>
 public class EnhancedLocalFileSystem : IFileSystem
 {
-    private static readonly Regex LegalName = new(@"^[.\/]*[a-zA-Z0-9_\/]+$", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+    private static readonly Regex LegalName = new(@"^[.\/]*[a-zA-Z0-9_\/]+\z", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     /// <summary>Creates a file system rooted at <paramref name="root"/> (empty means the current directory).</summary>
     /// <param name="root">The folder the partials live in.</param>
