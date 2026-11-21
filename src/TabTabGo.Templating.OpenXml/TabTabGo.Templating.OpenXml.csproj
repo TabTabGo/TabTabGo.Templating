@@ -13,6 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TabTabGo.Templating.OpenXml.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="..\..\assets\logo@32.png" Pack="true" PackagePath="" Link="logo@32.png" />
     <None Include="README.md" Pack="true" PackagePath="" />
   </ItemGroup>

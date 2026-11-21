@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using DotLiquid;
 using DotLiquid.Exceptions;
 using TabTabGo.Templating.Liquid;
@@ -169,5 +170,60 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         }
 
         Assert.Equal("root-part", new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'sub/alias'"));
+    }
+
+    [Fact]
+    public void ReadTemplateFile_AFifoInTheRoot_IsRefusedWithoutBlocking_AndWithoutAServerPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var fifo = Path.Combine(_root, "_pipe.liquid");
+        using (var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", fifo) { RedirectStandardError = true }))
+        {
+            make!.WaitForExit();
+            if (make.ExitCode != 0)
+            {
+                return; // no mkfifo on this machine
+            }
+        }
+
+        var previous = TabTabGo.Templating.Liquid.Internal.GuardedRead.SpecialFileTimeout;
+        TabTabGo.Templating.Liquid.Internal.GuardedRead.SpecialFileTimeout = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'pipe'"));
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+            Assert.DoesNotContain(_root, ex.ToString().Split('\n').Where(l => !l.TrimStart().StartsWith("at ", StringComparison.Ordinal)).Aggregate(string.Empty, (a, b) => a + b));
+        }
+        finally
+        {
+            TabTabGo.Templating.Liquid.Internal.GuardedRead.SpecialFileTimeout = previous;
+            using (var release = new FileStream(fifo, FileMode.Open, FileAccess.Write))
+            {
+                // a writer lets the blocked reader thread finish
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadTemplateFile_AnEmptyRegularPartial_IsStillRead()
+    {
+        File.WriteAllText(Path.Combine(_root, "_empty.liquid"), string.Empty);
+
+        Assert.Equal(string.Empty, new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'empty'"));
+    }
+
+    [Fact]
+    public void FullPath_IllegalPath_ExceptionNamesNoRoot()
+    {
+        var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).FullPath("../../../etc/passwd"));
+
+        Assert.DoesNotContain(_root, ex.Message);
     }
 }

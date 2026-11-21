@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Linq;
+using TabTabGo.Templating.OpenXml.SpreadSheet.Internal;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Newtonsoft.Json.Linq;
@@ -243,11 +245,11 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             new JObject { ["Key"] = "Dup", ["SIndex"] = 3 },
             new JObject { ["Key"] = "Dup", ["SIndex"] = 4 },
             new JObject { ["Key"] = "a'b", ["SIndex"] = 5 },
-            new JObject { ["Key"] = "end\\", ["SIndex"] = 6 });
+            new JObject { ["Key"] = "end\\", ["SIndex"] = 4 });
 
         var cells = Cells(Workbook(new JArray(Row(Cell(null, "x", "Dup"), Cell(null, "x", "a'b"), Cell(null, "x", "end\\"), Cell(null, "x", "missing"))), styleMap: styleMap));
 
-        Assert.Equal(new[] { 3u, 5u, 6u, 0u }, cells.Select(c => c.StyleIndex!.Value));
+        Assert.Equal(new[] { 3u, 5u, 4u, 0u }, cells.Select(c => c.StyleIndex!.Value));
     }
 
     [Fact]
@@ -734,5 +736,210 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         using var stream = new MemoryStream();
 
         Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(stream, workbook));
+    }
+
+    // ---- round 6: B4 path-free stylesheet errors, B5 special files, B1 date range, B2 StyleMap range
+
+    private static string EverythingButStackLines(Exception ex)
+    {
+        var parts = new List<string>();
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            parts.Add(e.Message);
+            parts.AddRange(e.ToString().Split('\n').Where(line => !line.TrimStart().StartsWith("at ", StringComparison.Ordinal)));
+            if (e is System.Xml.XmlException xml)
+            {
+                parts.Add(xml.SourceUri ?? string.Empty);
+            }
+
+            if (e is FileNotFoundException notFound)
+            {
+                parts.Add(notFound.FileName ?? string.Empty);
+            }
+        }
+
+        return string.Join("\n", parts);
+    }
+
+    private void AssertPathFree(Exception ex)
+    {
+        var text = EverythingButStackLines(ex);
+        Assert.DoesNotContain(_base, text);
+        Assert.DoesNotContain(Path.GetFileName(_base), text);
+        Assert.Null(ex.InnerException);
+    }
+
+    private Exception StylesheetFailure(string path)
+    {
+        var writer = new JsonSpreedSheet(new TemplatingOptions { StylesheetRoot = Path.Combine(_base, "root") });
+        return Assert.ThrowsAny<Exception>(() => writer.CreateExcelDoc(new MemoryStream(), Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = path })));
+    }
+
+    [Fact]
+    public void B4_UnreadableStylesheet_IsPathFree()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        var file = Path.Combine(_base, "root", "noperm.xml");
+        File.WriteAllText(file, StyleXml);
+        File.SetUnixFileMode(file, UnixFileMode.None);
+        try
+        {
+            var ex = StylesheetFailure("noperm.xml");
+
+            Assert.IsType<FileNotFoundException>(ex);
+            AssertPathFree(ex);
+        }
+        finally
+        {
+            File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
+    public void B4_DirectoryNamedLikeAStylesheet_IsPathFree()
+    {
+        Directory.CreateDirectory(Path.Combine(_base, "root", "d.xml"));
+
+        var ex = StylesheetFailure("d.xml");
+
+        Assert.IsType<FileNotFoundException>(ex);
+        AssertPathFree(ex);
+    }
+
+    [Theory]
+    [InlineData("<styleSheet")]
+    [InlineData("not xml at all")]
+    [InlineData("<!DOCTYPE styleSheet [<!ENTITY e \"x\">]><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">&e;</styleSheet>")]
+    public void B4_MalformedOrDtdStylesheet_IsAPathFreeArgumentException(string xml)
+    {
+        File.WriteAllText(Path.Combine(_base, "root", "bad.xml"), xml);
+
+        var ex = StylesheetFailure("bad.xml");
+
+        Assert.IsType<ArgumentException>(ex);
+        AssertPathFree(ex);
+    }
+
+    [Fact]
+    public void B4_SymbolicLinkLoop_IsPathFree()
+    {
+        var root = Path.Combine(_base, "root");
+        if (!TryLink(Path.Combine(root, "a.xml"), "b.xml", directory: false) || !TryLink(Path.Combine(root, "b.xml"), "a.xml", directory: false))
+        {
+            return;
+        }
+
+        var ex = StylesheetFailure("a.xml");
+
+        AssertPathFree(ex);
+    }
+
+    [Fact]
+    public void B5_AFifoInTheStylesheetRoot_IsRefusedWithoutBlocking()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var fifo = Path.Combine(_base, "root", "pipe.xml");
+        using (var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", fifo) { RedirectStandardError = true }))
+        {
+            make!.WaitForExit();
+            if (make.ExitCode != 0)
+            {
+                return; // no mkfifo on this machine
+            }
+        }
+
+        var previous = GuardedRead.SpecialFileTimeout;
+        GuardedRead.SpecialFileTimeout = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            var ex = StylesheetFailure("pipe.xml");
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+            Assert.IsType<FileNotFoundException>(ex);
+            AssertPathFree(ex);
+        }
+        finally
+        {
+            GuardedRead.SpecialFileTimeout = previous;
+            using (var release = new FileStream(fifo, FileMode.Open, FileAccess.Write))
+            {
+                // opening a writer lets the blocked reader thread finish
+            }
+        }
+    }
+
+    [Fact]
+    public void B5_AnEmptyRegularStylesheet_StillFailsAsMalformedXml_NotAsNotFound()
+    {
+        File.WriteAllText(Path.Combine(_base, "root", "empty.xml"), string.Empty);
+
+        Assert.IsType<ArgumentException>(StylesheetFailure("empty.xml"));
+    }
+
+    [Theory]
+    [InlineData("0001-01-01")]
+    [InlineData("1800-01-01")]
+    [InlineData("1899-12-30")]
+    [InlineData("1900-01-01")]
+    [InlineData("1900-02-28")]
+    public void B1_DatesBefore19000301_AreRefused(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", text))))));
+    }
+
+    [Fact]
+    public void B1_DateTimeValues_BeforeTheSafeRange_AreRefused()
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", DateTime.MinValue))))));
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", DateTimeOffset.MinValue))))));
+    }
+
+    [Theory]
+    [InlineData("1900-03-01", "61")]
+    [InlineData("1900-03-02", "62")]
+    [InlineData("9999-12-31", "2958465")]
+    public void B1_DatesFrom19000301_AreExcelSerials(string text, string expected)
+    {
+        Assert.Equal(expected, Assert.Single(Cells(Workbook(new JArray(Row(Cell("Date", text)))))).CellValue!.Text);
+    }
+
+    [Fact]
+    public void B1_TheLatestInstantOf9999_IsStillADateOnTheLastDay()
+    {
+        var cell = Assert.Single(Cells(Workbook(new JArray(Row(Cell("Date", DateTime.MaxValue))))));
+
+        Assert.StartsWith("2958465.", cell.CellValue!.Text);
+    }
+
+    [Fact]
+    public void B2_StyleMapIndexes_OutsideTheStylesheet_AreRefused()
+    {
+        var styleMap = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 999, ["SAlternativeIndex"] = 888 });
+
+        // the first body row uses SIndex, the second uses SAlternativeIndex
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell(null, "h", "X"))), styleMap: styleMap)));
+        var alternativeOnly = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 1, ["SAlternativeIndex"] = 888 });
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell(null, "h", "X")), Row(Cell(null, "a", "X")), Row(Cell(null, "b", "X"))), styleMap: alternativeOnly)));
+    }
+
+    [Fact]
+    public void B2_StyleMapIndexes_AreCheckedAgainstALoadedStylesheet()
+    {
+        var writer = WriterWithStylesheet(2, out var stylesheets);
+        var inside = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 1 });
+        var outside = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 2 });
+
+        Assert.Equal(1u, Assert.Single(Cells(Workbook(new JArray(Row(Cell(null, "h", "X"))), styleMap: inside, stylesheets: stylesheets), writer)).StyleIndex!.Value);
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell(null, "h", "X"))), styleMap: outside, stylesheets: stylesheets), writer));
     }
 }

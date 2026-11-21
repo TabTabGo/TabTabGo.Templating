@@ -670,4 +670,19 @@ public class FilterCriteriaLimitsTests
             Assert.IsNotType<InsufficientExecutionStackException>(outcome);
         }
     }
+
+    [Theory]
+    [InlineData("renew==1")]
+    [InlineData("it[\"k\"] ?? 1")]
+    [InlineData("it.k ?? 1 > 0")]
+    [InlineData("1 ?? 1")]
+    [InlineData("it[\"k\"] + 1 = 1")]
+    public void An1_ExpressionsThatParseButDoNotCompile_AreAnArgumentException(string expression)
+    {
+        var ex = Record.Exception(() => CollectionFilters.Filter(Rows(), expression));
+
+        Assert.IsType<ArgumentException>(ex);
+        Assert.True(ex!.Message.Length < 400, ex.Message);
+        Assert.Null(ex.InnerException);
+    }
 }

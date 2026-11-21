@@ -91,7 +91,7 @@ public sealed class StylesheetPathTests : IDisposable
     {
         // S-7: the stylesheet is read with the size cap; the same file loads when the cap allows it
         var tooSmall = new Engine(new TemplatingOptions { StylesheetRoot = _root, MaxXmlCharacters = 50 });
-        Assert.ThrowsAny<System.Xml.XmlException>(() => tooSmall.Render("", Workbook("styles.xml")));
+        Assert.Throws<ArgumentException>(() => tooSmall.Render("", Workbook("styles.xml"))); // the XmlException is replaced by a path-free ArgumentException
 
         var roomy = new Engine(new TemplatingOptions { StylesheetRoot = _root, MaxXmlCharacters = 100_000 });
         using var result = Assert.IsType<MemoryStream>(roomy.Render("", Workbook("styles.xml")));
@@ -134,7 +134,7 @@ public sealed class StylesheetPathTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_root, "dtd.xml"), "<!DOCTYPE s [<!ENTITY x \"y\">]>" + StyleXml);
 
-        Assert.ThrowsAny<System.Xml.XmlException>(() => EngineWithRoot().Render("", Workbook("dtd.xml")));
+        Assert.Throws<ArgumentException>(() => EngineWithRoot().Render("", Workbook("dtd.xml")));
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public sealed class StylesheetPathTests : IDisposable
             "<!DOCTYPE styleSheet [<!ENTITY size \"11\">]><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
             + "<fonts count=\"1\"><font><sz val=\"&size;\"/></font></fonts></styleSheet>");
 
-        var error = Assert.ThrowsAny<System.Xml.XmlException>(() => EngineWithRoot().Render("", Workbook("entity.xml")));
+        var error = Assert.Throws<ArgumentException>(() => EngineWithRoot().Render("", Workbook("entity.xml")));
 
         // The Open XML SDK also refuses DTDs later (same message), so also require that OUR loader is the one that rejected it;
         // otherwise changing DtdProcessing.Prohibit to Parse would go unnoticed.
