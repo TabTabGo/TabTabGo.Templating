@@ -283,7 +283,8 @@ internal static class TemplateNesting
                 var close = template.IndexOf("#}", open + 2, StringComparison.Ordinal);
                 if (close < 0)
                 {
-                    break;
+                    i = open + 2; // an unclosed {# is text; the tags after it still count
+                    continue;
                 }
 
                 tokens.Add("{% comment %}");

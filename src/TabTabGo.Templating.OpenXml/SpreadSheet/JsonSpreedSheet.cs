@@ -166,20 +166,32 @@ public class JsonSpreedSheet
         }
 
         double number;
-        switch (token.Type)
+        try
         {
-            case JTokenType.Integer:
-            case JTokenType.Float:
-                number = Convert.ToDouble(((JValue)token).Value, CultureInfo.InvariantCulture);
-                break;
-            case JTokenType.String when double.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed):
-                number = parsed;
-                break;
-            default:
-                throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+            switch (token.Type)
+            {
+                case JTokenType.Integer:
+                case JTokenType.Float:
+                    number = ((JValue)token).Value switch
+                    {
+                        System.Numerics.BigInteger big => (double)big, // above 2^63 Newtonsoft keeps a BigInteger, which Convert cannot read
+                        { } other => Convert.ToDouble(other, CultureInfo.InvariantCulture),
+                        _ => throw new ArgumentException("SheetId must be a whole number from 1.", "json"),
+                    };
+                    break;
+                case JTokenType.String when double.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed):
+                    number = parsed;
+                    break;
+                default:
+                    throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+            }
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json", ex);
         }
 
-        if (number < 1 || number > uint.MaxValue || number != Math.Floor(number))
+        if (!(number >= 1 && number <= uint.MaxValue) || number != Math.Floor(number))
         {
             throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json");
         }
