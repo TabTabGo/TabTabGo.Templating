@@ -33,16 +33,27 @@ internal static class TemplateNesting
     /// <param name="template">The template text.</param>
     /// <param name="maxDepth">The limit (at least 1).</param>
     /// <exception cref="SyntaxException">The template nests blocks too deeply, or DotLiquid rejects its syntax.</exception>
-    public static Template Parse(string template, int maxDepth)
+    public static Template Parse(string template, int maxDepth) => Parse(template, maxDepth, SharedTokenParseSupported(typeof(Template).Assembly.GetName().Version));
+
+    /// <summary>True when the last <see cref="Parse(string, int, bool)"/> on this thread took the shared-token path (tests pin that the public overload asks the gate).</summary>
+    [ThreadStatic]
+    internal static bool LastParseWasShared;
+
+    /// <summary>The parse with the path chosen by the caller: the shared-token path, or the stock <c>Template.Parse</c> after the scan (tests run both).</summary>
+    /// <param name="template">The template text.</param>
+    /// <param name="maxDepth">The limit (at least 1).</param>
+    /// <param name="sharedTokens">True for the shared-token parse; only valid on the DotLiquid version the gate accepts.</param>
+    /// <exception cref="SyntaxException">The template nests blocks too deeply, or DotLiquid rejects its syntax.</exception>
+    internal static Template Parse(string template, int maxDepth, bool sharedTokens)
     {
         // DotLiquid has no public overload for pre-tokenized input (its Template constructor is internal too), but Template.Parse is exactly: new Template(), Root = new Document(), Root.Initialize(null, null, tokens)
         // over Tokenizer.Tokenize(source, level) (verified in 2.3.260's IL: ParseInternal does nothing else; Literal.FromShortHand and Comment.FromShortHand, the whitespace-control
         // rewrite and the end-of-tag checks all run inside Tokenize, so one preprocessed string feeds both the scan and the parser). Doing those steps here lets the scan and the parser share one token list (the tokenizer is superlinear, so a second
         // pass doubled the parse cost). The tests compare the resulting tree with Template.Parse.
         // only the DotLiquid the shared-token path was verified against; any other version takes the stock Template.Parse (scan, then parse) so a bumped DotLiquid cannot change the tree
-        var shared = SharedTokenParseSupported(typeof(Template).Assembly.GetName().Version);
+        LastParseWasShared = sharedTokens;
         List<string>? tokens = null;
-        if (shared)
+        if (sharedTokens)
         {
             tokens = Tokens(template);
             if (Depth(tokens, maxDepth) > maxDepth)
