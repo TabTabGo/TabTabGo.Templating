@@ -17,11 +17,16 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PACKAGE_IDS = ("TabTabGo.Templating", "TabTabGo.Templating.Dotliquid", "TabTabGo.Templating.OpenXml")
-TAG_VERSION = re.compile(r"^(?P<core>(?P<major>[0-9]+)\.(?P<minor>[0-9]+)\.(?P<patch>[0-9]+))(?P<pre>-(rc|ci|alpha|beta)\.[0-9]+)?$")
-TFM_MAJOR = re.compile(r"^net(?P<major>[0-9]+)\.0$")
+_NUMBER = r"(?:0|[1-9][0-9]*)"  # no leading zeros
+TAG_VERSION = re.compile(
+    rf"(?P<core>(?P<major>{_NUMBER})\.(?P<minor>{_NUMBER})\.(?P<patch>{_NUMBER}))(?P<pre>-(?:rc|ci|alpha|beta)\.{_NUMBER})?",
+    re.ASCII,
+)
+TFM_MAJOR = re.compile(r"net(?P<major>[0-9]+)\.0", re.ASCII)
 
 
 class GuardError(Exception):
@@ -33,7 +38,7 @@ def parse_tag(tag: str) -> dict[str, str | bool]:
     if not tag.startswith("v"):
         raise GuardError(f"tag '{tag}' does not start with 'v'")
     version = tag[1:]
-    match = TAG_VERSION.match(version)
+    match = TAG_VERSION.fullmatch(version)
     if not match:
         raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|ci|alpha|beta).N")
     return {
@@ -46,17 +51,35 @@ def parse_tag(tag: str) -> dict[str, str | bool]:
     }
 
 
+def msbuild_property(path: Path, name: str) -> list[str]:
+    """Values of the MSBuild property `name` declared in a PropertyGroup of `path`.
+
+    The file is parsed as XML, so a commented-out `<Version>` or a text match inside another element is never read.
+    """
+    try:
+        tree = ET.parse(path)
+    except ET.ParseError as error:
+        raise GuardError(f"{path.name} is not well-formed XML: {error}") from error
+    values: list[str] = []
+    for group in tree.getroot().iter():
+        if group.tag.rpartition("}")[2] != "PropertyGroup":
+            continue
+        for element in group:
+            if element.tag.rpartition("}")[2] == name and element.text and element.text.strip():
+                values.append(element.text.strip())
+    return values
+
+
 def target_frameworks(root: Path) -> set[str]:
     """Reads <TargetFramework> from Directory.Build.props, else from every src csproj."""
-    pattern = re.compile(r"<TargetFramework>([^<]+)</TargetFramework>")
     props = root / "Directory.Build.props"
     if props.exists():
-        found = pattern.findall(props.read_text(encoding="utf-8-sig"))
+        found = msbuild_property(props, "TargetFramework")
         if found:
             return set(found)
     frameworks: set[str] = set()
     for csproj in sorted((root / "src").glob("*/*.csproj")):
-        frameworks.update(pattern.findall(csproj.read_text(encoding="utf-8-sig")))
+        frameworks.update(msbuild_property(csproj, "TargetFramework"))
     return frameworks
 
 
@@ -66,7 +89,7 @@ def check_tfm_major(root: Path, tag_major: str) -> None:
     if not frameworks:
         raise GuardError("no <TargetFramework> found in Directory.Build.props or src/*/*.csproj")
     for framework in frameworks:
-        match = TFM_MAJOR.match(framework)
+        match = TFM_MAJOR.fullmatch(framework)
         if not match:
             raise GuardError(f"unsupported target framework '{framework}'")
         if match.group("major") != tag_major:
@@ -101,10 +124,10 @@ def declared_version(root: Path) -> str:
     props = root / "Directory.Build.props"
     if not props.exists():
         raise GuardError("Directory.Build.props not found")
-    match = re.search(r"<Version>([^<]+)</Version>", props.read_text(encoding="utf-8-sig"))
-    if not match:
+    versions = msbuild_property(props, "Version")
+    if not versions:
         raise GuardError("no <Version> in Directory.Build.props")
-    return match.group(1).strip()
+    return versions[0]
 
 
 def check_declared_version(root: Path, core: str) -> None:

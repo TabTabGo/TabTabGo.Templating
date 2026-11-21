@@ -162,14 +162,15 @@ public sealed class JsonSpreedSheetCellTests
     }
 
     [Fact]
-    public void WorkbookWithoutSheetsColumnsOrRows_IsStillWritten()
+    public void WorkbookWithoutColumnsOrRows_IsStillWritten_ButNeedsASheet()
     {
         using var stream = new MemoryStream();
-        new JsonSpreedSheet().CreateExcelDoc(stream, JObject.Parse("""{ "Workbook": { } }"""));
+        new JsonSpreedSheet().CreateExcelDoc(stream, JObject.Parse("""{ "Workbook": { "Sheets": [ { "Name": "S" } ] } }"""));
         stream.Position = 0;
         using var document = SpreadsheetDocument.Open(stream, false);
 
-        Assert.Empty(document.WorkbookPart!.Workbook!.Descendants<Sheet>());
+        Assert.Single(document.WorkbookPart!.Workbook!.Descendants<Sheet>());
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(new MemoryStream(), JObject.Parse("""{ "Workbook": { } }""")));
     }
 
     [Fact]

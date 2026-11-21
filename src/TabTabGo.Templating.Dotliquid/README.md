@@ -50,10 +50,10 @@ Parsing happens before `RenderTimeout` starts. DotLiquid's tokenizer is superlin
 `MaxNestingDepth` (100) refuses a template that nests blocks deeper, by a linear scan before parsing: DotLiquid's parser recurses once per level, and a few thousand nested
 `{% if %}` tags overflow the stack and end the process (this was also true of 8.0.x and stock DotLiquid). The scan runs over DotLiquid's own tokens (so `{{ ... }}` output text and `{%-` tags split as the parser splits them), finds block tags through the registered tag types (custom blocks
 count), lowers the depth only for an end tag that closes the innermost open block, and skips `raw` and `comment` bodies (the tokenizer returns each as one text token). As a backstop the
-parse itself runs on a thread with a 256 MB stack (reserved, committed only as used), so a template the scan undercounted cannot overflow the caller's stack.
-Two limits of the backstop: a host with strict memory overcommit (`vm.overcommit_memory=2`) may fail to start the 256 MB-stack thread, and it is not sized for `MaxTemplateCharacters` 0 or
-very large template files (about 110 000 nested blocks per 1 000 000 characters); the scan still applies in both cases. The scan binds to DotLiquid's internal tokenizer, so the package
-depends on DotLiquid `[2.3.260, 2.4.0)`; a bump goes through the architect and the nesting fuzz tests. A refused template throws `DotLiquid.Exceptions.SyntaxException`.
+parse itself runs on a thread whose reserved stack is 512 KB plus 8 KB per allowed level (1 312 KB at the default 100, capped at 256 MB), so a template the scan undercounted by a small margin cannot overflow the caller's stack.
+Measured on DotLiquid 2.3.260 the parser needs about 0.6 KB per nested level (100 levels fit in 64 KB, 1 000 levels need about 0.6 MB), so the reserve is about 13 times the need; it was a fixed 256 MB per render.
+The backstop is not sized for a template the scan undercounts by orders of magnitude, nor for `MaxTemplateCharacters` 0 or very large template files; the scan is the guard. The scan binds to DotLiquid's internal tokenizer, so the package
+depends on DotLiquid `[2.3.260, 2.4.0)`; a bump goes through the architect and the nesting fuzz tests. If that internal tokenizer cannot be bound (a changed signature), the engine does not fail: it uses the stock `Template.Parse` and an approximate linear scan. A refused template throws `DotLiquid.Exceptions.SyntaxException`.
 
 **`ParseTimeout` only reaches regular expressions DotLiquid creates after the engine has been created** (DotLiquid builds some parse expressions once, at first use, with the process-wide value current then). A host that calls `DotLiquid.Template.Parse` before it creates a `TemplatingEngine` keeps DotLiquid's 10 s default for those expressions (with `ParseTimeout` of 1 ms, a 700 000-character template still rendered in 279 ms instead of timing out). Create the engine before any other DotLiquid use.
 
@@ -102,7 +102,7 @@ Filters are called with the C# member name: `{{ value | FormatNumber: 'N2', 'en-
 `{{ items | Filter: 'it["status"].ToString() = "active"' }}` evaluates a [System.Linq.Dynamic.Core](https://dynamic-linq.net/) 1.7 expression over the items (`it`).
 `ToString()`/`Equals()` on `object` are allowed so existing expression shapes keep working (`it["k"].ToString() = "v"`, `.StartsWith("v")`, `== null`, `!= null`,
 `.Contains(...) and ...`); reflection over other types is blocked. Do not build expressions from untrusted data. Prefer `FilterBy: 'status', 'active'` (compared as text)
-and `FilterByPrefix: 'name', 'Al'` (ordinal): no expression is parsed. `Filter`'s `.StartsWith` is culture-sensitive, so the two differ for characters ICU ignores.
+and `FilterByPrefix: 'name', 'Al'` (ordinal): no expression is parsed. A `Filter` expression runs outside the output limit, so it may not call `PadLeft`, `PadRight`, `Replace`, `Repeat`, `Insert`, `Concat`, `Join` or `Format`, and no method call may be given a number above 10 000 (including a format such as `"D500000000"`); such an expression throws `ArgumentException`. `Filter`'s `.StartsWith` is culture-sensitive, so the two differ for characters ICU ignores.
 
 ### `AppSetting`, `GetMatch`, `XPathSelect`
 
