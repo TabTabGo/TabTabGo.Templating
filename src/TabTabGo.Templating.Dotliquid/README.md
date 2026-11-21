@@ -40,6 +40,8 @@ that directory: names that are rooted, that climb out of it with `..`, that come
 it fail with `FileSystemException`; messages never contain server paths. The file system belongs to the render, so templates in different folders resolve their own
 partials concurrently, and each render starts from its own context: `{% assign %}` and `{% capture %}` values never carry over to another render of the same file.
 
+**Known limitation: the template and stylesheet folders must not be writable by untrusted parties.** .NET cannot tell a named pipe or a device file from an empty regular file before opening it (all report `FileAttributes.Normal` and length 0), and a plain open of a named pipe blocks the render thread, so no managed check can refuse one; no native call is made because none is portable to musl, macOS and Windows alike. Someone who can create a pipe in those folders can already replace the templates themselves. Files are read through a byte-counting cap of 16 MB.
+
 `RenderString` parses on every call. Includes inside a string template resolve (confined) against `TemplatingOptions.TemplatesPath` when it is set; otherwise
 DotLiquid falls back to a file system the host assigned to `Template.FileSystem`.
 

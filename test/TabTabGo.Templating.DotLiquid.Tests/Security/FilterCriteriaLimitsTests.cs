@@ -25,8 +25,33 @@ public class FilterCriteriaLimitsTests
 
     private static string Ids(object? result) => string.Join(",", ((System.Collections.IEnumerable)result!).Cast<Hash>().Select(h => h["id"]));
 
-    /// <summary>Runs on a caller thread with a small stack, the way a host's request thread may look.</summary>
-    private static T OnSmallStack<T>(Func<T> action)
+    private static readonly object LogLock = new();
+
+    /// <summary>Records what a stack test really measured: as a diagnostic message, and appended to the file named by <c>TTG_STACK_LOG</c> when that variable is set (CI containers read it back).</summary>
+    private static void LogStack(string message)
+    {
+        TestContext.Current.SendDiagnosticMessage(message);
+        if (Environment.GetEnvironmentVariable("TTG_STACK_LOG") is { Length: > 0 } path)
+        {
+            lock (LogLock)
+            {
+                File.AppendAllText(path, TestContext.Current.Test?.TestDisplayName + ": " + message + "\n");
+            }
+        }
+    }
+
+    /// <summary>The stack a "small stack" caller is left with, in KB (what a 256 KB thread has after the runtime's own bookkeeping).</summary>
+    private const int SmallStackFreeKilobytes = 200;
+
+    /// <summary>Runs on a caller thread with a small stack, the way a host's request thread may look: exactly <see cref="SmallStackFreeKilobytes"/> KB free, whatever the platform gave the thread.</summary>
+    private static T OnSmallStack<T>(Func<T> action) => OnStackWithFree(SmallStackFreeKilobytes, action);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on a fresh thread with exactly <paramref name="freeKilobytes"/> KB of stack left. The thread's real capacity is measured on that thread (descend until the
+    /// runtime's own check fails, plus the 128 KB it keeps), never taken from the requested size: Linux reuses the cached stack of an earlier, larger thread, so a small request can get 1 MB.
+    /// The measured capacity is logged so a run shows what was really exercised.
+    /// </summary>
+    private static T OnStackWithFree<T>(int freeKilobytes, Func<T> action)
     {
         T? result = default;
         Exception? error = null;
@@ -35,14 +60,21 @@ public class FilterCriteriaLimitsTests
             {
                 try
                 {
-                    result = action();
+                    var capacity = FramesUntil(System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack, 0) * 16 + 128;
+                    LogStack($"measured stack capacity {capacity} KB; the action runs with {freeKilobytes} KB free");
+                    if (capacity < freeKilobytes + 64)
+                    {
+                        Assert.Skip($"the thread has only {capacity} KB of stack, too little for a {freeKilobytes} KB free-stack scenario");
+                    }
+
+                    result = WithStackConsumed(capacity - freeKilobytes, action);
                 }
                 catch (Exception ex)
                 {
                     error = ex;
                 }
             },
-            maxStackSize: 256 * 1024);
+            maxStackSize: 1024 * 1024);
         thread.Start();
         thread.Join();
         if (error != null)
@@ -436,26 +468,63 @@ public class FilterCriteriaLimitsTests
         Volatile.Write(ref frame[^1], 1);
     }
 
-    /// <summary>Consumes 16 KB frames until the margin probe flips to false; returns how many frames that took (measured on this thread, so it does not depend on the platform's stack rounding).</summary>
+    /// <summary>Consumes 16 KB frames until <paramref name="stillOk"/> says no; returns how many frames that took. It measures the stack of THE THREAD IT RUNS ON, whatever size was requested for it.</summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining | System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)]
-    private static int FramesUntilTheMarginIsLost(int framesSoFar)
+    private static int FramesUntil(Func<bool> stillOk, int framesSoFar)
     {
         Span<byte> frame = stackalloc byte[16 * 1024];
         TouchEveryPage(frame);
-        var total = FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels) ? FramesUntilTheMarginIsLost(framesSoFar + 1) : framesSoFar;
+        var total = stillOk() ? FramesUntil(stillOk, framesSoFar + 1) : framesSoFar;
         return frame[0] == 1 ? total : -1;
     }
 
-    /// <summary>The requested size of the threads the stack tests run on. What a thread really gets is platform dependent (Linux x64 gives a 512 KB request about 1 MB), so no test assumes a size.</summary>
+    private static bool ProbeSaysYes() => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels);
+
+    /// <summary>
+    /// A thread asked for <see cref="TestThreadKilobytes"/>. What it really gets is platform dependent (Linux reuses the cached stack of an earlier thread, so a small request can get 1 MB), so no
+    /// test assumes a size: every test measures on the thread it runs on.
+    /// </summary>
     private const int TestThreadKilobytes = 512;
 
-    private static readonly Lazy<int> FlipKilobytes = new(() => OnStack(TestThreadKilobytes, 0, () => FramesUntilTheMarginIsLost(0)) * 16);
+    /// <summary>
+    /// Runs <paramref name="action"/> on a fresh thread after measuring THAT thread: it descends until the margin probe flips, unwinds, then consumes the stack up to
+    /// <paramref name="offsetFromFlip"/> KB past that flip point (negative: the probe still says yes, with that much to spare) and runs the action. Measurement and action share one thread
+    /// and therefore one stack, whatever size the platform really gave it.
+    /// </summary>
+    private static T OnTightStack<T>(int offsetFromFlip, Func<T> action)
+    {
+        T? result = default;
+        Exception? error = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    var flipKilobytes = FramesUntil(ProbeSaysYes, 0) * 16;
+                    var capacity = FramesUntil(System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack, 0) * 16 + 128;
+                    LogStack($"measured stack capacity {capacity} KB (requested {TestThreadKilobytes} KB); the probe flips after {flipKilobytes} KB; scenario offset {offsetFromFlip} KB");
+                    if (capacity < 300 || flipKilobytes + offsetFromFlip < 0)
+                    {
+                        Assert.Skip($"the thread has only {capacity} KB of stack (probe flip {flipKilobytes} KB): too little for the scenario");
+                    }
 
-    /// <summary>How many KB a <see cref="TestThreadKilobytes"/> thread can consume before the margin probe flips to false: measured on this machine, once. Tests place their consumption relative to it.</summary>
-    private static int Flip => FlipKilobytes.Value;
+                    result = WithStackConsumed(Math.Max(0, flipKilobytes + offsetFromFlip), action);
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+            },
+            maxStackSize: TestThreadKilobytes * 1024);
+        thread.Start();
+        thread.Join();
+        if (error != null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        }
 
-    /// <summary>Runs on a thread whose stack is consumed to <paramref name="offsetFromFlip"/> KB past the point where the probe flips (negative: the probe still says yes, with that much to spare).</summary>
-    private static T OnTightStack<T>(int offsetFromFlip, Func<T> action) => OnStack(TestThreadKilobytes, Math.Max(0, Flip + offsetFromFlip), action);
+        return result!;
+    }
 
     private static T OnStack<T>(int kilobytes, int consumedKilobytes, Func<T> action)
     {
@@ -589,13 +658,22 @@ public class FilterCriteriaLimitsTests
     [Fact]
     public void F1_StackMargin_IsTrueWithRoomAndFalseWhenHalfTheStackIsGone()
     {
-        Assert.True(OnStack(1024, 0, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
+        Assert.True(OnStack(1024, 0, ProbeSaysYes));
 
-        // relative, measured on the thread itself (no assumption about the platform's stack size, rounding or the JIT tier): the probe wants 256 KB free, so it must say yes a little
-        // before the flip point and no a little after it, and the flip point must be somewhere inside the thread
-        Assert.True(Flip > 32, $"the probe flipped after only {Flip} KB");
-        Assert.True(OnTightStack(-32, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)), "still true 32 KB before the flip point");
-        Assert.False(OnTightStack(32, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)), "false 32 KB after the flip point");
+        // everything below is measured on ONE thread, so it holds whatever stack the platform gave that thread
+        var (probeFlip, runtimeFlip, yesBefore, noAfter) = OnStack(TestThreadKilobytes, 0, () =>
+        {
+            var probe = FramesUntil(ProbeSaysYes, 0) * 16;
+            var runtime = FramesUntil(System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack, 0) * 16;
+            return (probe, runtime, WithStackConsumed(Math.Max(0, probe - 32), ProbeSaysYes), WithStackConsumed(probe + 32, ProbeSaysYes));
+        });
+
+        Assert.True(probeFlip > 0, "the probe was already false on a fresh thread");
+        Assert.True(yesBefore, "the probe still says yes 32 KB before its flip point");
+        Assert.False(noAfter, "the probe says no 32 KB after its flip point");
+
+        // the probe asks for 8 x 16 KB on top of what the runtime's own check guarantees (about 128 KB): its flip comes that much earlier than the runtime's
+        Assert.InRange(runtimeFlip - probeFlip, 80, 180);
     }
 
     [Fact]
@@ -804,6 +882,7 @@ public class FilterCriteriaLimitsTests
             }
         });
 
+        LogStack($"M35: {runs} depths ran with the probe saying yes (4 KB steps)");
         Assert.True(runs > 20, $"only {runs} depths ran");
         Assert.Empty(failures);
     }
