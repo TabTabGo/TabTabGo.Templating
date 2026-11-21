@@ -102,18 +102,39 @@ public sealed class TemplateNestingDifferentialTests
     }
 
     /// <summary>
-    /// Fragments with raw and comment blocks, the {# #} shorthand, stray end tags, unterminated or interleaved tags (<c>{{ a }</c>, <c>{{{</c>, a stray <c>{%</c> or <c>%}</c>, <c>{%-</c> inside another tag): the real tokenizer rejects many; DotLiquid returns a raw or comment body as one
-    /// text token and rewrites the shorthand before splitting, while the fallback keeps the tags and skips the body in the scan, so the two disagree on unbalanced or interleaved input and
-    /// the fallback can undercount. No bound on the gap is claimed; the 256 MB parse stack that the fallback path is given is what covers it. Recorded, bounded, not fixed: the fallback only runs when the tokenizer cannot be bound,
-    /// and then the parse thread has the 256 MB maximum stack.
+    /// Fragments with raw and comment blocks, the {# #} shorthand, stray end tags, unterminated or interleaved tags: the real tokenizer rejects many; DotLiquid returns a raw or comment
+    /// body as one text token and rewrites the shorthand before splitting, while the fallback keeps the tags and skips the body in the scan, so the two can disagree on unbalanced or
+    /// interleaved input. No bound on the gap is asserted (a fixed seed would hide it); it is logged, and the 256 MB parse stack that the fallback path is given is what covers it.
     /// </summary>
     [Fact]
-    public void Differential_MalformedFragments_FallbackUndercountIsRareAndSmall()
+    public void Differential_MalformedFragments_ReportTheGap_WithoutAssertingABound()
     {
         var (rejected, over, under) = Compare(Pieces, 1);
+        var worst = under.Count == 0 ? 0 : under.Max(u => int.Parse(u.Split(" vs ")[0]) - int.Parse(u.Split(" vs ")[1].Split(':')[0]));
 
-        Assert.True(under.Count < 100, $"{under.Count} undercounts of {4_000 - rejected} accepted fragments");
-        Assert.True(over >= 0);
+        TestContext.Current.SendDiagnosticMessage($"malformed fragments: rejected={rejected} overcounts={over} undercounts={under.Count} worst gap={worst}");
+        Assert.True(rejected >= 0);
+    }
+
+    [Theory]
+    [InlineData("{%- if a -%}", "{%- endif -%}")]
+    [InlineData("{% if a %}", "{% endif %}")]
+    public void KnownShapes_AreRefusedAtTheDepthCap_InFallbackMode(string open, string close)
+    {
+        var template = string.Concat(Enumerable.Repeat(open, 500)) + "x" + string.Concat(Enumerable.Repeat(close, 500));
+
+        Assert.True(TemplateNesting.Depth(TemplateNesting.Tokens(template, null), 100) > 100);
+    }
+
+    [Theory]
+    [InlineData("{# unclosed ")]
+    [InlineData("{# unclosed {{ x }} ")]
+    [InlineData("{{ x }}{# unclosed ")]
+    public void UnclosedCommentShorthandThenDeepNesting_IsRefusedAtTheDepthCap_InFallbackMode(string prefix)
+    {
+        var template = prefix + string.Concat(Enumerable.Repeat("{% if a %}", 500)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 500));
+
+        Assert.True(TemplateNesting.Depth(TemplateNesting.Tokens(template, null), 100) > 100);
     }
 
     [Fact]

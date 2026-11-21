@@ -619,6 +619,8 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     [InlineData("-1")]
     [InlineData("\"abc\"")]
     [InlineData("true")]
+    [InlineData("65535")]
+    [InlineData("4294967295")]
     [InlineData("4294967296")]
     [InlineData("9223372036854775808")]
     [InlineData("123456789012345678901234567890")]
@@ -676,5 +678,61 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         Assert.Equal(255, all.Select(s => s.Name!.Value!.ToLowerInvariant()).Distinct().Count());
         Assert.Equal(255, all.Select(s => s.SheetId!.Value).Distinct().Count());
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public void B2_SheetId_65534_IsTheLargestAccepted_AndSchemaValid()
+    {
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 65534, ["Name"] = "A" })), stream);
+
+        Assert.Equal(65534u, document.WorkbookPart!.Workbook!.Descendants<Sheet>().Single().SheetId!.Value);
+        Assert.Empty(new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(document));
+    }
+
+    private const string Big = "1000000000000000000000000000000";
+
+    [Theory]
+    [InlineData("SheetId", Big)]
+    [InlineData("SheetId", "-" + Big)]
+    [InlineData("StyleIndex", Big)]
+    [InlineData("StyleIndex", "-" + Big)]
+    [InlineData("StyleIndex", "-1")]
+    [InlineData("StyleIndex", "1.5")]
+    [InlineData("StyleIndex", "\"abc\"")]
+    [InlineData("StyleIndex", "true")]
+    [InlineData("Date", Big)]
+    [InlineData("Date", "-" + Big)]
+    [InlineData("Number", "\"" + Big + "x\"")]
+    [InlineData("Number", "\"NaN\"")]
+    [InlineData("Boolean", Big)]
+    [InlineData("Boolean", "-" + Big)]
+    [InlineData("Boolean", "7")]
+    [InlineData("Column", "\"abc\"")]
+    [InlineData("Column", Big)]
+    [InlineData("Column", "-" + Big)]
+    [InlineData("Collapsed", "\"abc\"")]
+    [InlineData("Collapsed", Big)]
+    public void B1_EveryNumericConversion_ThrowsArgumentException_AndNothingElse(string target, string valueJson)
+    {
+        var value = JToken.Parse(valueJson);
+        var workbook = target switch
+        {
+            "SheetId" => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = value, ["Name"] = "A" })),
+            "StyleIndex" => Workbook(new JArray(Row(new JObject { ["CellValue"] = "x", ["StyleIndex"] = value }))),
+            "Date" => Workbook(new JArray(Row(new JObject { ["DataType"] = "Date", ["CellValue"] = value }))),
+            "Number" => Workbook(new JArray(Row(new JObject { ["DataType"] = "Number", ["CellValue"] = value }))),
+            "Boolean" => Workbook(new JArray(Row(new JObject { ["DataType"] = "Boolean", ["CellValue"] = value }))),
+            "Column" => Workbook(new JArray()),
+            _ => Workbook(new JArray(new JObject { ["Collapsed"] = value })),
+        };
+        if (target == "Column")
+        {
+            ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = new JArray(new JObject { ["Min"] = value, ["Max"] = 2, ["Width"] = value });
+        }
+
+        using var stream = new MemoryStream();
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(stream, workbook));
     }
 }
