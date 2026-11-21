@@ -270,34 +270,36 @@ internal static class FilterCriteriaGuard
             return base.VisitMethodCall(node);
         }
 
-        /// <summary>The ordinal form of a culture-sensitive one-argument call, or null when the call is already ordinal.</summary>
+        /// <summary>
+        /// The ordinal form of a culture-sensitive string search or comparison, or null when the call needs no rewrite (it has no string argument, already carries an
+        /// ordinal <see cref="StringComparison"/>, or is not a search or comparison). Every overload of <c>IndexOf</c>, <c>LastIndexOf</c>, <c>StartsWith</c>,
+        /// <c>EndsWith</c>, <c>Compare</c> and <c>CompareTo</c> that takes a string and no comparison is rewritten to its matching ordinal overload; one with no ordinal
+        /// overload is refused. Culture-sensitive search is quadratic and cannot be interrupted.
+        /// </summary>
         private static Expression? Ordinal(MethodCallExpression node)
         {
             var method = node.Method;
             var parameters = method.GetParameters();
-            if (method.Name == "Compare" && parameters.Length == 2 && parameters.All(p => p.ParameterType == typeof(string)))
+            if (parameters.Any(p => p.ParameterType == typeof(StringComparison)) || !parameters.Any(p => p.ParameterType == typeof(string)))
             {
-                // string < and > become string.Compare, which is culture-sensitive; the ordinal comparison gives the same answer for the usual data
-                return Expression.Call(typeof(string).GetMethod(nameof(string.CompareOrdinal), new[] { typeof(string), typeof(string) })!, node.Arguments[0], node.Arguments[1]);
+                return null; // the comparison argument was already checked to be ordinal
             }
 
-            if (parameters.Length != 1 || parameters[0].ParameterType != typeof(string))
+            var types = parameters.Select(p => p.ParameterType).ToArray();
+            switch (method.Name)
             {
-                return null;
+                case "Compare" when typeof(string).GetMethod(nameof(string.CompareOrdinal), types) is { } compareOrdinal:
+                    return Expression.Call(compareOrdinal, node.Arguments);
+                case "CompareTo" when types.Length == 1 && types[0] == typeof(string):
+                    return Expression.Call(typeof(string).GetMethod(nameof(string.CompareOrdinal), new[] { typeof(string), typeof(string) })!, node.Object!, node.Arguments[0]);
+                case "IndexOf" or "LastIndexOf" or "StartsWith" or "EndsWith"
+                    when typeof(string).GetMethod(method.Name, types.Append(typeof(StringComparison)).ToArray()) is { } ordinal:
+                    return Expression.Call(node.Object, ordinal, node.Arguments.Append(Expression.Constant(StringComparison.Ordinal)));
+                case "Compare" or "CompareTo" or "IndexOf" or "LastIndexOf" or "StartsWith" or "EndsWith":
+                    throw new ArgumentException($"A Filter expression may not call that overload of {method.Name}: it has no ordinal form.");
+                default:
+                    return null;
             }
-
-            if (method.Name == "CompareTo")
-            {
-                return Expression.Call(typeof(string).GetMethod(nameof(string.CompareOrdinal), new[] { typeof(string), typeof(string) })!, node.Object!, node.Arguments[0]);
-            }
-
-            if (method.Name is "IndexOf" or "StartsWith" or "EndsWith")
-            {
-                var ordinal = typeof(string).GetMethod(method.Name, new[] { typeof(string), typeof(StringComparison) })!;
-                return Expression.Call(node.Object, ordinal, node.Arguments[0], Expression.Constant(StringComparison.Ordinal));
-            }
-
-            return null;
         }
 
         private static bool IsAllowed(MethodInfo method)

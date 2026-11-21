@@ -194,4 +194,142 @@ public class FilterCriteriaLimitsTests
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
         _ = ex; // a fast machine may finish within the time-out; the bound on the time is what is asserted
     }
+
+    // ---- S-3 addendum: every overload that takes a string
+
+    private static readonly HashSet<string> CultureFamily = new() { "IndexOf", "LastIndexOf", "StartsWith", "EndsWith", "Compare", "CompareTo" };
+
+    private static Expression? Argument(Type type) => type switch
+    {
+        _ when type == typeof(string) => Expression.Constant("a"),
+        _ when type == typeof(int) => Expression.Constant(0),
+        _ when type == typeof(char) => Expression.Constant('a'),
+        _ when type == typeof(bool) => Expression.Constant(false),
+        _ when type == typeof(StringComparison) => Expression.Constant(StringComparison.CurrentCulture),
+        _ when type == typeof(System.Globalization.CompareOptions) => Expression.Constant(System.Globalization.CompareOptions.None),
+        _ when type == typeof(System.Globalization.CultureInfo) => Expression.Constant(null, type),
+        _ when type == typeof(object) => Expression.Constant(null, type),
+        _ => null, // spans, arrays, runes, providers: cannot be built as constants here (and are refused by the parameter-type rule)
+    };
+
+    private static IEnumerable<Expression> StringCalls()
+    {
+        foreach (var method in typeof(string).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static))
+        {
+            var parameters = method.GetParameters();
+            if (!parameters.Any(p => p.ParameterType == typeof(string)) || method.IsGenericMethod)
+            {
+                continue;
+            }
+
+            var arguments = parameters.Select(p => Argument(p.ParameterType)).ToArray();
+            if (arguments.Any(a => a == null))
+            {
+                continue;
+            }
+
+            yield return Expression.Call(method.IsStatic ? null : Expression.Constant("abc"), method, arguments!);
+        }
+    }
+
+    private static bool IsCultureSensitiveSearch(MethodCallExpression call)
+    {
+        if (call.Method.DeclaringType != typeof(string) || !CultureFamily.Contains(call.Method.Name))
+        {
+            return false;
+        }
+
+        var comparison = call.Arguments.OfType<ConstantExpression>().FirstOrDefault(a => a.Type == typeof(StringComparison));
+        var hasString = call.Method.GetParameters().Any(p => p.ParameterType == typeof(string));
+        return hasString && comparison is not { Value: StringComparison.Ordinal or StringComparison.OrdinalIgnoreCase };
+    }
+
+    [Fact]
+    public void EveryStringOverload_IsRewrittenToOrdinal_OrRefused_NeverPassedThroughCultureSensitive()
+    {
+        var calls = StringCalls().Cast<MethodCallExpression>().ToList();
+        Assert.True(calls.Count > 40, $"only {calls.Count} overloads enumerated");
+
+        foreach (var call in calls)
+        {
+            Expression? result = null;
+            try
+            {
+                result = FilterCriteriaGuard.CheckTree(call);
+            }
+            catch (ArgumentException)
+            {
+                continue; // refused
+            }
+
+            var remaining = new CallCollector();
+            remaining.Visit(result);
+            Assert.DoesNotContain(remaining.Calls, IsCultureSensitiveSearch);
+            Assert.DoesNotContain(remaining.Calls, c => c.Method.DeclaringType == typeof(string) && CultureFamily.Contains(c.Method.Name)
+                && c.Method.GetParameters().Any(p => p.ParameterType == typeof(System.Globalization.CultureInfo)));
+        }
+    }
+
+    [Theory]
+    [InlineData("IndexOf", 2)]
+    [InlineData("IndexOf", 3)]
+    [InlineData("StartsWith", 1)]
+    [InlineData("EndsWith", 1)]
+    [InlineData("Compare", 2)]
+    [InlineData("Compare", 5)]
+    [InlineData("CompareTo", 1)]
+    public void TheRewrittenOverloads_AreOrdinal(string name, int parameterCount)
+    {
+        var method = typeof(string).GetMethods().First(m => m.Name == name && m.GetParameters().Length == parameterCount
+            && m.GetParameters().All(p => p.ParameterType == typeof(string) || p.ParameterType == typeof(int)));
+        var arguments = method.GetParameters().Select(p => Argument(p.ParameterType)!).ToArray();
+        var call = Expression.Call(method.IsStatic ? null : Expression.Constant("abc"), method, arguments);
+
+        var collector = new CallCollector();
+        collector.Visit(FilterCriteriaGuard.CheckTree(call));
+
+        Assert.NotEmpty(collector.Calls);
+        Assert.DoesNotContain(collector.Calls, IsCultureSensitiveSearch);
+    }
+
+    private sealed class CallCollector : ExpressionVisitor
+    {
+        public List<MethodCallExpression> Calls { get; } = new();
+
+        protected override Expression VisitMethodCall(MethodCallExpression node)
+        {
+            Calls.Add(node);
+            return base.VisitMethodCall(node);
+        }
+    }
+
+    [Theory]
+    [InlineData("it[\"k\"].ToString().IndexOf(\"__NEEDLE__\", 5) >= 0")]
+    [InlineData("it[\"k\"].ToString().IndexOf(\"__NEEDLE__\", 5, 90000) >= 0")]
+    [InlineData("string.Compare(it[\"k\"].ToString(), 0, \"__NEEDLE__\", 0, 9000) = 0")]
+    [InlineData("it[\"k\"].ToString().StartsWith(\"__NEEDLE__\")")]
+    public void QuadraticOffsetAndRangeOverloads_AreFast_UnderARenderTimeout(string template)
+    {
+        var haystack = new string('a', 100_000);
+        var needle = new string('a', 900) + "b";
+        var rows = new List<object> { new Hash { ["id"] = 1, ["k"] = haystack }, new Hash { ["id"] = 2, ["k"] = haystack } };
+        var engine = new Liquid.TemplatingEngine(new TemplatingOptions { RenderTimeout = TimeSpan.FromSeconds(1) });
+        var expression = template.Replace("__NEEDLE__", needle);
+        var watch = Stopwatch.StartNew();
+
+        var result = Record.Exception(() => engine.RenderString("{% assign r = rows | Filter: expr %}{{ r | Size }}", new { rows, expr = expression }));
+        watch.Stop();
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}: {result?.Message}");
+    }
+
+    [Fact]
+    public void OffsetOverloads_GiveTheOrdinalAnswer()
+    {
+        using var _ = new TabTabGo.Templating.DotLiquid.Tests.Support.CultureScope("en-US");
+        var rows = new List<object> { new Hash { ["id"] = 1, ["k"] = "\u00ADAlice Al" } };
+
+        Assert.Equal("1", Ids(CollectionFilters.Filter(rows, "it[\"k\"].ToString().IndexOf(\"Al\", 3) = 7")));
+        Assert.Equal("1", Ids(CollectionFilters.Filter(rows, "string.Compare(it[\"k\"].ToString(), 1, \"Alice\", 0, 5) = 0")));
+    }
 }
