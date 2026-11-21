@@ -443,4 +443,82 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     }
 
 
+
+    // ---- round 3
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("1,5")]
+    [InlineData("NaN")]
+    [InlineData("1e999")]
+    public void Q1_NumberCell_WithNonNumericText_Throws(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Number", text))))));
+    }
+
+    [Theory]
+    [InlineData("12.50", "12.5")]
+    [InlineData(" 7 ", "7")]
+    [InlineData("1e3", "1000")]
+    public void Q1_NumberCell_WritesTheCanonicalInvariantForm(string text, string expected)
+    {
+        Assert.Equal(expected, Assert.Single(Cells(Workbook(new JArray(Row(Cell("Number", text)))))).CellValue!.Text);
+    }
+
+    [Theory]
+    [InlineData("maybe")]
+    [InlineData("2")]
+    public void Q1_BooleanCell_WithOtherText_Throws(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Boolean", text))))));
+    }
+
+    [Theory]
+    [InlineData("Number", "   ")]
+    [InlineData("Boolean", " \t ")]
+    public void Q1_WhitespaceNumberOrBoolean_IsAnEmptyCell(string type, string text)
+    {
+        var cell = Assert.Single(Cells(Workbook(new JArray(Row(Cell(type, text))))));
+
+        Assert.Null(cell.CellValue);
+        Assert.Null(cell.DataType);
+    }
+
+    [Theory]
+    [InlineData("a{C1}b")]
+    [InlineData("a{C0}b")]
+    [InlineData("a\tb")]
+    [InlineData("a{HI}b")]
+    [InlineData("a{LO}")]
+    public void N3_SheetNameWithControlCharactersOrLoneSurrogates_Throws_BeforeAnythingIsWritten(string template)
+    {
+        var name = template.Replace("{C1}", "\u0001").Replace("{C0}", "\u0000").Replace("{HI}", "\ud800").Replace("{LO}", "\udc00");
+        using var stream = new MemoryStream();
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(stream, Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = name }))));
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1.5")]
+    [InlineData("-1")]
+    [InlineData("\"abc\"")]
+    [InlineData("true")]
+    public void N3_InvalidSheetId_Throws(string idJson)
+    {
+        var sheets = new JArray(new JObject { ["SheetId"] = JToken.Parse(idJson), ["Name"] = "A" });
+
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), sheets)));
+    }
+
+    [Fact]
+    public void N4_MoreThan255Sheets_Throw_And255Work()
+    {
+        JArray Sheets(int count) => new(Enumerable.Range(1, count).Select(i => new JObject { ["SheetId"] = i, ["Name"] = "S" + i }));
+        using var stream = new MemoryStream();
+
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), Sheets(256))));
+        Assert.Equal(0, stream.Length);
+    }
 }

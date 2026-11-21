@@ -70,4 +70,21 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         var fs = new EnhancedLocalFileSystem(_root);
         Assert.Throws<FileSystemException>(() => fs.ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'nothere'"));
     }
+
+    [Fact]
+    public void ReadTemplateFile_DanglingLinkInsideTheRoot_ThrowsWithoutAServerPath()
+    {
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(_root, "_dangling.liquid"), "nonexistent.liquid");
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is PlatformNotSupportedException)
+        {
+            return;
+        }
+
+        var ex2 = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'dangling'"));
+
+        Assert.DoesNotContain(_root, ex2.Message);
+    }
 }

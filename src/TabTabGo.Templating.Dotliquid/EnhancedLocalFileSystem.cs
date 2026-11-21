@@ -31,7 +31,15 @@ namespace TabTabGo.Templating.Liquid
             if (!File.Exists(fullPath))
                 throw new FileSystemException("Template not found", templatePath);
 
-            return File.ReadAllText(fullPath);
+            try
+            {
+                return File.ReadAllText(fullPath);
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
+            {
+                // a dangling link or an unreadable file: the system message carries the absolute path, ours does not
+                throw new FileSystemException("Template not found", templatePath);
+            }
         }
 
         public string FullPath(string templatePath)

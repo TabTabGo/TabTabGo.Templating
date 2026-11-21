@@ -177,10 +177,32 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 //  case CellValues.String:
                 // default:
                 var text = ToValidXml(jCell["CellValue"]?.ToString() ?? string.Empty);
-                if (dataType == CellValues.Boolean)
+                if (dataType == CellValues.Boolean && !string.IsNullOrWhiteSpace(text))
                 {
                     // a boolean cell holds 1 or 0
-                    text = bool.TryParse(text, out var flag) ? (flag ? "1" : "0") : text;
+                    var lower = text.Trim().ToLowerInvariant();
+                    if (lower == "true" || lower == "1")
+                    {
+                        text = "1";
+                    }
+                    else if (lower == "false" || lower == "0")
+                    {
+                        text = "0";
+                    }
+                    else
+                    {
+                        throw new ArgumentException("A Boolean cell must hold true, false, 1 or 0.", "json");
+                    }
+                }
+                else if (dataType == CellValues.Number && !string.IsNullOrWhiteSpace(text))
+                {
+                    // the canonical invariant round-trip form; text that is not a finite number would write an invalid workbook
+                    if (!double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var number) || double.IsNaN(number) || double.IsInfinity(number))
+                    {
+                        throw new ArgumentException("A Number cell must hold a finite number.", "json");
+                    }
+
+                    text = number.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
                 }
 
                 if (dataType == CellValues.InlineString || dataType == CellValues.SharedString)
@@ -197,7 +219,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     throw new ArgumentException("An Error cell must hold one of #N/A, #REF!, #VALUE!, #DIV/0!, #NAME?, #NUM!, #NULL!.", "json");
                 }
 
-                if (text.Length == 0 && (dataType == CellValues.Number || dataType == CellValues.Boolean))
+                if (string.IsNullOrWhiteSpace(text) && (dataType == CellValues.Number || dataType == CellValues.Boolean))
                 {
                     // an empty number or boolean is an empty cell (it keeps its style)
                     cell.StyleIndex = GetStyleIndex(jCell, styleMap, (rowIndex > 0 && rowIndex % 2 != 0), styleCount);
@@ -326,15 +348,21 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", "json");
             }
 
+            if (sheets.Count > 255)
+            {
+                throw new ArgumentException("The workbook may define at most 255 sheets.", "json");
+            }
+
             var ids = new HashSet<uint>();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sheet in sheets)
             {
                 var name = (string?)sheet["Name"];
                 if (string.IsNullOrWhiteSpace(name) || name.Length > 31 || name.IndexOfAny(InvalidSheetNameChars) >= 0
-                    || name[0] == '\'' || name[name.Length - 1] == '\'' || name.Equals("History", StringComparison.OrdinalIgnoreCase))
+                    || name[0] == '\'' || name[name.Length - 1] == '\'' || name.Equals("History", StringComparison.OrdinalIgnoreCase)
+                    || HasControlOrLoneSurrogate(name))
                 {
-                    throw new ArgumentException("A sheet name must be 1 to 31 characters, may not contain any of [ ] : * ? / \\, may not start or end with an apostrophe, and may not be 'History'.", "json");
+                    throw new ArgumentException("A sheet name must be 1 to 31 characters, may not contain any of [ ] : * ? / \\, may not start or end with an apostrophe, may not be 'History', and may not contain control characters or lone surrogates.", "json");
                 }
 
                 if (!names.Add(name))
@@ -342,11 +370,58 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     throw new ArgumentException($"The sheet name '{name}' is used more than once (names are compared ignoring case).", "json");
                 }
 
-                if ((uint?)sheet["SheetId"] is { } id && !ids.Add(id))
+                if (ReadSheetId(sheet["SheetId"]) is { } id && !ids.Add(id))
                 {
                     throw new ArgumentException($"SheetId {id} is used by more than one sheet.", "json");
                 }
             }
+        }
+
+        private static bool HasControlOrLoneSurrogate(string name)
+        {
+            for (var i = 0; i < name.Length; i++)
+            {
+                if (char.IsControl(name[i]))
+                {
+                    return true;
+                }
+
+                if (char.IsHighSurrogate(name[i]) && i + 1 < name.Length && char.IsLowSurrogate(name[i + 1]))
+                {
+                    i++;
+                }
+                else if (char.IsSurrogate(name[i]))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static uint? ReadSheetId(JToken? token)
+        {
+            if (token == null || token.Type == JTokenType.Null)
+            {
+                return null;
+            }
+
+            double number;
+            if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+            {
+                number = Convert.ToDouble(((JValue)token).Value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else if (token.Type != JTokenType.String || !double.TryParse(token.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out number))
+            {
+                throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+            }
+
+            if (number < 1 || number > uint.MaxValue || number != Math.Floor(number))
+            {
+                throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json");
+            }
+
+            return (uint)number;
         }
 
         private static string ToValidXml(string s)
@@ -384,7 +459,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
             var volume = Path.GetPathRoot(absolutePath) ?? string.Empty;
             var resolved = new List<string>();
-            var pending = new Stack<string>(absolutePath.Substring(volume.Length).Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse());
+            var pending = new Stack<string>(Enumerable.Reverse(absolutePath.Substring(volume.Length).Split(separators, StringSplitOptions.RemoveEmptyEntries)));
             var hops = 0;
             while (pending.Count > 0)
             {
@@ -426,7 +501,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     target = target.Substring(volume.Length);
                 }
 
-                foreach (var part in target.Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse())
+                foreach (var part in Enumerable.Reverse(target.Split(separators, StringSplitOptions.RemoveEmptyEntries)))
                 {
                     pending.Push(part);
                 }
