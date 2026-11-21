@@ -446,6 +446,17 @@ public class FilterCriteriaLimitsTests
         return frame[0] == 1 ? total : -1;
     }
 
+    /// <summary>The requested size of the threads the stack tests run on. What a thread really gets is platform dependent (Linux x64 gives a 512 KB request about 1 MB), so no test assumes a size.</summary>
+    private const int TestThreadKilobytes = 512;
+
+    private static readonly Lazy<int> FlipKilobytes = new(() => OnStack(TestThreadKilobytes, 0, () => FramesUntilTheMarginIsLost(0)) * 16);
+
+    /// <summary>How many KB a <see cref="TestThreadKilobytes"/> thread can consume before the margin probe flips to false: measured on this machine, once. Tests place their consumption relative to it.</summary>
+    private static int Flip => FlipKilobytes.Value;
+
+    /// <summary>Runs on a thread whose stack is consumed to <paramref name="offsetFromFlip"/> KB past the point where the probe flips (negative: the probe still says yes, with that much to spare).</summary>
+    private static T OnTightStack<T>(int offsetFromFlip, Func<T> action) => OnStack(TestThreadKilobytes, Math.Max(0, Flip + offsetFromFlip), action);
+
     private static T OnStack<T>(int kilobytes, int consumedKilobytes, Func<T> action)
     {
         T? result = default;
@@ -514,11 +525,11 @@ public class FilterCriteriaLimitsTests
         for (var i = 0; i < 5; i++)
         {
             FilterCriteriaGuard.ClearCache();
-            var outcome = Record.Exception(() => OnStack(256, 0, () => CollectionFilters.Filter(Rows(), expression)));
+            var outcome = Record.Exception(() => OnTightStack(-16, () => CollectionFilters.Filter(Rows(), expression))); // the probe still admits the caller thread
             Assert.IsNotType<InsufficientExecutionStackException>(outcome); // any other exception is a catchable refusal; a crash would have ended the test run
 
             FilterCriteriaGuard.ClearCache();
-            var deep = Record.Exception(() => OnStack(300, 150, () => CollectionFilters.Filter(Rows(), expression)));
+            var deep = Record.Exception(() => OnTightStack(32, () => CollectionFilters.Filter(Rows(), expression))); // the probe declines; the large-stack thread parses
             Assert.IsNotType<InsufficientExecutionStackException>(deep); // never a crash
         }
     }
@@ -544,10 +555,10 @@ public class FilterCriteriaLimitsTests
     {
         Assert.False(FilterCriteriaGuard.IsShallow(expression, 0));
 
-        foreach (var (stack, consumed) in new[] { (200, 0), (256, 0), (300, 150), (480, 0) })
+        foreach (var offset in new[] { -64, -32, -16, 0, 16, 32, 64 })
         {
             FilterCriteriaGuard.ClearCache();
-            var outcome = Record.Exception(() => OnStack(stack, consumed, () => CollectionFilters.Filter(Rows(), expression)));
+            var outcome = Record.Exception(() => OnTightStack(offset, () => CollectionFilters.Filter(Rows(), expression)));
             Assert.IsNotType<InsufficientExecutionStackException>(outcome); // the shape is refused or evaluated, never a crash ({stack} KB)
         }
     }
@@ -580,11 +591,11 @@ public class FilterCriteriaLimitsTests
     {
         Assert.True(OnStack(1024, 0, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
 
-        // relative, measured on the thread itself: on a 512 KB thread the probe (it wants 256 KB free) must flip after the thread has consumed roughly 150 to 330 KB of its own stack,
-        // whatever the platform rounds the stack to and however the JIT tiers; and it must stay false deeper (the recursion only continues while it says yes)
-        var frames = OnStack(512, 0, () => FramesUntilTheMarginIsLost(0));
-        Assert.InRange(frames * 16, 100, 350);
-        Assert.False(OnStack(512, frames * 16 + 32, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
+        // relative, measured on the thread itself (no assumption about the platform's stack size, rounding or the JIT tier): the probe wants 256 KB free, so it must say yes a little
+        // before the flip point and no a little after it, and the flip point must be somewhere inside the thread
+        Assert.True(Flip > 32, $"the probe flipped after only {Flip} KB");
+        Assert.True(OnTightStack(-32, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)), "still true 32 KB before the flip point");
+        Assert.False(OnTightStack(32, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)), "false 32 KB after the flip point");
     }
 
     [Fact]
@@ -663,7 +674,7 @@ public class FilterCriteriaLimitsTests
         var normal = Ids(CollectionFilters.Filter(Rows(), expression));
 
         FilterCriteriaGuard.ClearCache();
-        var tight = Ids(OnStack(300, 160, () => CollectionFilters.Filter(Rows(), expression)));
+        var tight = Ids(OnTightStack(16, () => CollectionFilters.Filter(Rows(), expression))); // the probe declines (16 KB past the flip point), so the large-stack thread parses
 
         Assert.Equal("1,2", normal);
         Assert.Equal(normal, tight);
@@ -688,10 +699,10 @@ public class FilterCriteriaLimitsTests
     [MemberData(nameof(ArchitectRepros))]
     public void M8_NestedBracketRepros_NeverCrash_OnAThreadWithJustOver128KbFree(string expression)
     {
-        foreach (var consumed in new[] { 144, 160, 176 })
+        foreach (var offset in new[] { -32, -16, 0, 16 })
         {
             FilterCriteriaGuard.ClearCache();
-            var outcome = Record.Exception(() => OnStack(320, consumed, () => CollectionFilters.Filter(Rows(), expression)));
+            var outcome = Record.Exception(() => OnTightStack(offset, () => CollectionFilters.Filter(Rows(), expression)));
             Assert.IsNotType<InsufficientExecutionStackException>(outcome);
         }
     }
