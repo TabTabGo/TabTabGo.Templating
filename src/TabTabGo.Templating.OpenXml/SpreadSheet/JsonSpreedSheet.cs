@@ -534,13 +534,13 @@ public class JsonSpreedSheet
                 MaxCharactersInDocument = _options.MaxXmlCharacters,
             };
 
-            return GuardedRead.Run(full, () =>
+            return GuardedRead.Read(full, stream =>
             {
-                using var reader = System.Xml.XmlReader.Create(full, settings);
+                using var reader = System.Xml.XmlReader.Create(stream, settings);
                 return XDocument.Load(reader);
             });
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or TimeoutException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             // an unreadable file, a directory, a pipe: the system message carries the absolute path, ours does not (and no inner exception that could)
             throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
