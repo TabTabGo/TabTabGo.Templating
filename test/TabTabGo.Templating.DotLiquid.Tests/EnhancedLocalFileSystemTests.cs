@@ -87,4 +87,59 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
 
         Assert.DoesNotContain(_root, ex2.Message);
     }
+
+    [Fact]
+    public void FullPath_IllegalPath_ExceptionNamesNoRoot()
+    {
+        var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).FullPath("../../../etc/passwd"));
+
+        Assert.DoesNotContain(_root, ex.Message);
+    }
+
+    [Fact]
+    public void ReadTemplateFile_AFifoInTheRoot_IsRefusedWithoutBlocking_AndWithoutAServerPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var fifo = Path.Combine(_root, "_pipe.liquid");
+        using (var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", fifo) { RedirectStandardError = true }))
+        {
+            make.WaitForExit();
+            if (make.ExitCode != 0)
+            {
+                return; // no mkfifo on this machine
+            }
+        }
+
+        var previous = TabTabGo.Templating.Liquid.GuardedRead.SpecialFileTimeout;
+        TabTabGo.Templating.Liquid.GuardedRead.SpecialFileTimeout = TimeSpan.FromMilliseconds(300);
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'pipe'"));
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+            Assert.DoesNotContain(_root, ex.Message);
+        }
+        finally
+        {
+            TabTabGo.Templating.Liquid.GuardedRead.SpecialFileTimeout = previous;
+            using (var release = new FileStream(fifo, FileMode.Open, FileAccess.Write))
+            {
+                // a writer lets the blocked reader thread finish
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadTemplateFile_AnEmptyRegularPartial_IsStillRead()
+    {
+        File.WriteAllText(Path.Combine(_root, "_empty.liquid"), string.Empty);
+
+        Assert.Equal(string.Empty, new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'empty'"));
+    }
 }

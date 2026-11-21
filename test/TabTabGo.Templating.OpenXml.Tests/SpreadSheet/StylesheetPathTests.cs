@@ -122,7 +122,7 @@ public sealed class StylesheetPathTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_root, "dtd.xml"), "<!DOCTYPE s [<!ENTITY x \"y\">]>" + StyleXml);
 
-        Assert.ThrowsAny<System.Xml.XmlException>(() => EngineWithRoot().Render("", Workbook("dtd.xml")));
+        Assert.Throws<ArgumentException>(() => EngineWithRoot().Render("", Workbook("dtd.xml")));
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public sealed class StylesheetPathTests : IDisposable
             "<!DOCTYPE styleSheet [<!ENTITY size \"11\">]><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
             + "<fonts count=\"1\"><font><sz val=\"&size;\"/></font></fonts></styleSheet>");
 
-        var error = Assert.ThrowsAny<System.Xml.XmlException>(() => EngineWithRoot().Render("", Workbook("entity.xml")));
+        var error = Assert.Throws<ArgumentException>(() => EngineWithRoot().Render("", Workbook("entity.xml")));
 
         // The Open XML SDK also refuses DTDs later (same message), so also require that OUR loader is the one that rejected it;
         // otherwise changing DtdProcessing.Prohibit to Parse would go unnoticed.

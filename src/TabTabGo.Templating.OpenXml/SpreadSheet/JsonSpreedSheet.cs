@@ -266,21 +266,38 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
             }
 
-            // a symbolic link inside the root may point outside it: compare the real paths
-            if (!RealPathIsInside(root, full))
+            try
             {
-                throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
-            }
+                // a symbolic link inside the root may point outside it: compare the real paths
+                if (!RealPathIsInside(root, full))
+                {
+                    throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
+                }
 
-            var settings = new System.Xml.XmlReaderSettings
+                var settings = new System.Xml.XmlReaderSettings
+                {
+                    DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                    XmlResolver = null,
+                    MaxCharactersInDocument = _options.MaxXmlCharacters,
+                };
+
+                return GuardedRead.Run(full, () =>
+                {
+                    using (var reader = System.Xml.XmlReader.Create(full, settings))
+                    {
+                        return XDocument.Load(reader);
+                    }
+                });
+            }
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException || ex is TimeoutException)
             {
-                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
-                XmlResolver = null,
-                MaxCharactersInDocument = _options.MaxXmlCharacters,
-            };
-            using (var reader = System.Xml.XmlReader.Create(full, settings))
+                // an unreadable file, a directory, a pipe: the system message carries the absolute path, ours does not
+                throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
+            }
+            catch (System.Xml.XmlException)
             {
-                return XDocument.Load(reader);
+                // the XmlException message and SourceUri can carry the file name
+                throw new ArgumentException("The stylesheet is not well-formed XML, or it uses a DTD (not allowed).", nameof(requested));
             }
         }
 
@@ -330,12 +347,15 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
             if (map != null)
             {
-                if (useAlternative && map["SAlternativeIndex"] != null)
+                var mapped = useAlternative && map["SAlternativeIndex"] != null
+                    ? ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0
+                    : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
+                if (mapped >= Math.Max(styleCount, 1))
                 {
-                    return UInt32Value.FromUInt32(ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0);
+                    throw new ArgumentException($"The StyleMap index {mapped} of '{format}' is outside the stylesheet's {styleCount} cell formats.", "json");
                 }
 
-                return UInt32Value.FromUInt32(ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0);
+                return UInt32Value.FromUInt32(mapped);
             }
 
             return UInt32Value.FromUInt32(0);
@@ -343,6 +363,11 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         private static List<uint> ValidateSheets(JToken? jSheets)
         {
+            if (jSheets is JContainer container && container.Count > 255)
+            {
+                throw new ArgumentException("The workbook may define at most 255 sheets.", "json"); // before any copy of the list
+            }
+
             var sheets = jSheets?.Children().ToList() ?? new List<JToken>();
             if (sheets.Count == 0)
             {
