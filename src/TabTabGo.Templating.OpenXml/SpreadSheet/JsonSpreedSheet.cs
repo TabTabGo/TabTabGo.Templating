@@ -158,45 +158,75 @@ public class JsonSpreedSheet
         return result;
     }
 
-    private static uint? ReadSheetId(JToken? token)
+    /// <summary>The largest SheetId the schema allows (the validator rejects anything above 65534).</summary>
+    internal const uint MaxSheetId = 65534;
+
+    private static uint? ReadSheetId(JToken? token) => ReadWholeNumber(token, "SheetId", 1, MaxSheetId);
+
+    /// <summary>
+    /// A whole number read from JSON (an integer, an integral float, or numeric text) within <paramref name="min"/> and <paramref name="max"/>; null for a missing or null value.
+    /// Every failure (a BigInteger beyond any type, negative, fractional, NaN, text) is an <see cref="ArgumentException"/>, never an InvalidCast, Format or Overflow exception.
+    /// </summary>
+    private static uint? ReadWholeNumber(JToken? token, string what, double min, double max)
     {
         if (token == null || token.Type == JTokenType.Null)
         {
             return null;
         }
 
-        double number;
+        var number = ReadDouble(token, what);
+        if (!(number >= min && number <= max) || number != Math.Floor(number))
+        {
+            throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", CultureInfo.InvariantCulture)} to {max.ToString("0", CultureInfo.InvariantCulture)} ({token}).", "json");
+        }
+
+        return (uint)number;
+    }
+
+    private static double ReadDouble(JToken token, string what)
+    {
         try
         {
             switch (token.Type)
             {
                 case JTokenType.Integer:
                 case JTokenType.Float:
-                    number = ((JValue)token).Value switch
+                    return ((JValue)token).Value switch
                     {
                         System.Numerics.BigInteger big => (double)big, // above 2^63 Newtonsoft keeps a BigInteger, which Convert cannot read
                         { } other => Convert.ToDouble(other, CultureInfo.InvariantCulture),
-                        _ => throw new ArgumentException("SheetId must be a whole number from 1.", "json"),
+                        _ => throw new ArgumentException($"{what} must be a number.", "json"),
                     };
-                    break;
                 case JTokenType.String when double.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed):
-                    number = parsed;
-                    break;
+                    return parsed;
                 default:
-                    throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+                    throw new ArgumentException($"{what} must be a number ({token}).", "json");
             }
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
-            throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json", ex);
+            throw new ArgumentException($"{what} must be a number ({token}).", "json", ex);
         }
+    }
 
-        if (!(number >= 1 && number <= uint.MaxValue) || number != Math.Floor(number))
+    private static bool ReadBoolean(JToken? token, string what)
+    {
+        if (token == null || token.Type == JTokenType.Null)
         {
-            throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json");
+            return false;
         }
 
-        return (uint)number;
+        if (token is JValue { Value: bool flag })
+        {
+            return flag;
+        }
+
+        return token.ToString().Trim().ToLowerInvariant() switch
+        {
+            "true" or "1" => true,
+            "false" or "0" => false,
+            _ => throw new ArgumentException($"{what} must be true or false ({token}).", "json"),
+        };
     }
 
     /// <summary>Explicit names are validated and must be unique ignoring case; a sheet without a name gets the first free "SheetN" from its position (linear: one running counter).</summary>
@@ -262,15 +292,15 @@ public class JsonSpreedSheet
         {
             var column = new Column
             {
-                Min = UInt32Value.FromUInt32((uint?)jColumn["Min"] ?? 1),
-                Max = UInt32Value.FromUInt32((uint?)jColumn["Max"] ?? 1),
+                Min = UInt32Value.FromUInt32(ReadWholeNumber(jColumn["Min"], "Column Min", 0, uint.MaxValue) ?? 1),
+                Max = UInt32Value.FromUInt32(ReadWholeNumber(jColumn["Max"], "Column Max", 0, uint.MaxValue) ?? 1),
                 CustomWidth = false,
                 BestFit = BooleanValue.FromBoolean((bool?)jColumn["BestFit"] ?? false),
             };
 
             if (jColumn["Width"] != null)
             {
-                column.Width = DoubleValue.FromDouble((double)jColumn["Width"]!);
+                column.Width = DoubleValue.FromDouble(ReadDouble(jColumn["Width"]!, "Column Width"));
                 column.CustomWidth = true;
             }
 
@@ -288,7 +318,7 @@ public class JsonSpreedSheet
         foreach (var jRow in json.SelectToken("$.Workbook.Worksheet.SheetData.Rows")?.Children() ?? Enumerable.Empty<JToken>())
         {
             rowNumber++;
-            var row = new Row { RowIndex = rowNumber, Collapsed = Convert.ToBoolean(jRow["Collapsed"], CultureInfo.InvariantCulture) };
+            var row = new Row { RowIndex = rowNumber, Collapsed = ReadBoolean(jRow["Collapsed"], "Row Collapsed") };
             if (jRow.SelectToken("Cells") is { } cells)
             {
                 var column = 0;
@@ -425,7 +455,7 @@ public class JsonSpreedSheet
         if (value.Type is JTokenType.Integer or JTokenType.Float
             || (value.Type == JTokenType.String && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
         {
-            var serial = Convert.ToDouble(value.Type == JTokenType.String ? text : ((JValue)value).Value, CultureInfo.InvariantCulture);
+            var serial = ReadDouble(value, "A Date cell");
             return serial >= 1 && serial <= MaxDateSerial
                 ? serial.ToString("R", CultureInfo.InvariantCulture)
                 : throw new ArgumentException($"A Date cell holding a number must be an Excel serial from 1 to {MaxDateSerial.ToString("0", CultureInfo.InvariantCulture)} ({text}).", "json");
@@ -506,7 +536,7 @@ public class JsonSpreedSheet
     {
         if (jCell["StyleIndex"] != null)
         {
-            var explicitIndex = Convert.ToUInt32(jCell["StyleIndex"], CultureInfo.InvariantCulture);
+            var explicitIndex = ReadWholeNumber(jCell["StyleIndex"], "StyleIndex", 0, uint.MaxValue) ?? 0;
             if (explicitIndex >= Math.Max(styleCount, 1))
             {
                 throw new ArgumentException($"StyleIndex {explicitIndex} is outside the stylesheet's {styleCount} cell formats.", "json");
@@ -527,10 +557,10 @@ public class JsonSpreedSheet
         {
             if (useAlternative && map["SAlternativeIndex"] != null)
             {
-                return UInt32Value.FromUInt32(Convert.ToUInt32(map["SAlternativeIndex"], CultureInfo.InvariantCulture));
+                return UInt32Value.FromUInt32(ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0);
             }
 
-            return UInt32Value.FromUInt32(Convert.ToUInt32(map["SIndex"], CultureInfo.InvariantCulture));
+            return UInt32Value.FromUInt32(ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0);
         }
 
         return UInt32Value.FromUInt32(0);
