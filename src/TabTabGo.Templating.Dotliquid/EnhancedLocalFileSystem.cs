@@ -39,14 +39,15 @@ public class EnhancedLocalFileSystem : IFileSystem
             throw new FileSystemException("Template not found", templatePath);
         }
 
-        if (!RealPathIsInsideRoot(fullPath))
+        var realPath = RealPathInsideRoot(fullPath);
+        if (realPath == null)
         {
             throw new FileSystemException("Illegal template path", templatePath);
         }
 
         try
         {
-            return Internal.GuardedRead.ReadText(fullPath);
+            return Internal.GuardedRead.ReadText(realPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
@@ -89,10 +90,11 @@ public class EnhancedLocalFileSystem : IFileSystem
         + Path.DirectorySeparatorChar;
 
     /// <summary>A symbolic link inside the root may point outside it (S-11): resolve every link and compare the real paths.</summary>
-    private bool RealPathIsInsideRoot(string fullPath)
+    private string? RealPathInsideRoot(string fullPath)
     {
         var root = ResolveLinks(NormalizedRoot().TrimEnd(Path.DirectorySeparatorChar)) + Path.DirectorySeparatorChar;
-        return ResolveLinks(Path.GetFullPath(fullPath)).StartsWith(root, PathComparison);
+        var real = ResolveLinks(Path.GetFullPath(fullPath));
+        return real.StartsWith(root, PathComparison) ? real : null; // the caller opens this resolved path, not the one it was given
     }
 
     /// <summary>
