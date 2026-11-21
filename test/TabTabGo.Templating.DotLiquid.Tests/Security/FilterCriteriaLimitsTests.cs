@@ -610,4 +610,64 @@ public class FilterCriteriaLimitsTests
 
         Assert.True(warmPerSecond > coldPerSecond, $"cached {warmPerSecond:F0}/s vs uncached {coldPerSecond:F0}/s");
     }
+
+    // ---- round 5: M-8 retry on the large stack, bracket nesting, near-full-stack repros
+
+    [Fact]
+    public void M8_WhenTheCallerRunsOutOfStack_TheCriteriaIsRetriedOnTheLargeStack_NotRefused()
+    {
+        var calls = 0;
+        Func<string, Func<Hash, bool>> failsOnce = _ =>
+        {
+            calls++;
+            throw new InsufficientExecutionStackException();
+        };
+
+        var predicate = FilterCriteriaGuard.ParseOnThisThread("it.k == \"abc\"", failsOnce);
+
+        Assert.Equal(1, calls);
+        Assert.True(predicate((Hash)Rows()[0]));
+        Assert.False(predicate((Hash)Rows()[1]));
+    }
+
+    [Fact]
+    public void M8_ALongTernary_IsAcceptedOnAThreadWithAbout140KbFree_ExactlyAsElsewhere()
+    {
+        var expression = Repeat("true ? true : ", 13) + "true";
+        FilterCriteriaGuard.ClearCache();
+        var normal = Ids(CollectionFilters.Filter(Rows(), expression));
+
+        FilterCriteriaGuard.ClearCache();
+        var tight = Ids(OnStack(300, 160, () => CollectionFilters.Filter(Rows(), expression)));
+
+        Assert.Equal("1,2", normal);
+        Assert.Equal(normal, tight);
+    }
+
+    [Fact]
+    public void M8_BracketsCountAsNesting_LikeParentheses()
+    {
+        Assert.Throws<ArgumentException>(() => CollectionFilters.Filter(Rows(), Repeat("it[", 70) + "\"a\"" + Repeat("]", 70)));
+        Assert.Throws<ArgumentException>(() => CollectionFilters.Filter(Rows(), Repeat("(", 40) + Repeat("it[", 30) + "\"a\"" + Repeat("]", 30) + Repeat(")", 40)));
+    }
+
+    public static IEnumerable<object[]> ArchitectRepros()
+    {
+        yield return new object[] { Repeat("it[", 23) + "\"a\"" + Repeat("]", 23) };
+        yield return new object[] { Repeat("(", 16) + Repeat("it[", 30) + "\"a\"" + Repeat("]", 30) + Repeat(")", 16) };
+        yield return new object[] { Repeat("\"a\"[", 50) + "0" + Repeat("]", 50) };
+        yield return new object[] { Repeat("it[", 60) };
+    }
+
+    [Theory]
+    [MemberData(nameof(ArchitectRepros))]
+    public void M8_NestedBracketRepros_NeverCrash_OnAThreadWithJustOver128KbFree(string expression)
+    {
+        foreach (var consumed in new[] { 144, 160, 176 })
+        {
+            FilterCriteriaGuard.ClearCache();
+            var outcome = Record.Exception(() => OnStack(320, consumed, () => CollectionFilters.Filter(Rows(), expression)));
+            Assert.IsNotType<InsufficientExecutionStackException>(outcome);
+        }
+    }
 }

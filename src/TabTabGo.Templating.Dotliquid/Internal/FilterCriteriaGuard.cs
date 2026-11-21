@@ -182,15 +182,16 @@ internal static class FilterCriteriaGuard
     }
 
     /// <summary>Short, shallow criteria need little stack, so they are parsed on the caller's thread (a thread per call costs ten times the parse).</summary>
-    private static Func<Hash, bool> ParseOnThisThread(string criteria)
+    internal static Func<Hash, bool> ParseOnThisThread(string criteria, Func<string, Func<Hash, bool>>? parse = null)
     {
         try
         {
-            return ParseAndCheck(criteria);
+            return (parse ?? ParseAndCheck)(criteria);
         }
         catch (InsufficientExecutionStackException)
         {
-            throw new ArgumentException("A Filter expression is too complex for the stack of this thread.");
+            // the caller has less stack than the probe promised (it moved on, or a shape needed more): the criteria is valid, so it is retried where the stack is large
+            return ParseOnLargeStack(criteria);
         }
     }
 
@@ -248,12 +249,12 @@ internal static class FilterCriteriaGuard
                 continue;
             }
 
-            if (c == '(')
+            if (c is '(' or '[')
             {
                 parentheses++;
                 run = 0;
             }
-            else if (c == ')')
+            else if (c is ')' or ']')
             {
                 parentheses = Math.Max(0, parentheses - 1);
                 run = 0;

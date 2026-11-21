@@ -620,6 +620,12 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     [InlineData("\"abc\"")]
     [InlineData("true")]
     [InlineData("4294967296")]
+    [InlineData("9223372036854775808")]
+    [InlineData("123456789012345678901234567890")]
+    [InlineData("1e300")]
+    [InlineData("\"1e300\"")]
+    [InlineData("\"\"")]
+    [InlineData("[]")]
     public void N3_InvalidSheetId_Throws(string idJson)
     {
         var sheets = new JArray(new JObject { ["SheetId"] = JToken.Parse(idJson), ["Name"] = "A" });
