@@ -481,8 +481,18 @@ public class JsonSpreedSheet
     /// </summary>
     private static string DateToSerial(DateTime date)
     {
-        var serial = date.ToOADate();
-        if (serial < FirstSafeDateSerial || Math.Floor(serial) > MaxDateSerial)
+        // the range is checked on the date itself, before ToOADate: it throws OverflowException for the years 1 to 99
+        double serial;
+        try
+        {
+            serial = date < new DateTime(1900, 3, 1) ? double.NaN : date.ToOADate();
+        }
+        catch (OverflowException)
+        {
+            serial = double.NaN;
+        }
+
+        if (double.IsNaN(serial) || serial < FirstSafeDateSerial || Math.Floor(serial) > MaxDateSerial)
         {
             throw new ArgumentException($"A Date cell must hold a date from 1900-03-01 to 9999-12-31 ({date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}).", "json");
         }

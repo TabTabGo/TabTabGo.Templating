@@ -1104,4 +1104,28 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         Assert.Equal(double.Parse(widthJson, System.Globalization.CultureInfo.InvariantCulture), column.Width!.Value);
         Assert.Empty(new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(document));
     }
+
+    [Theory]
+    [InlineData("0001-01-01")]
+    [InlineData("0001-06-15")]
+    [InlineData("0050-06-15")]
+    [InlineData("0099-12-31")]
+    [InlineData("0100-01-01")]
+    [InlineData("1899-12-31")]
+    [InlineData("1900-02-28")]
+    public void M39_DatesBefore19000301_AreAnArgumentException_NeverAnOverflow(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", text))))));
+    }
+
+    [Fact]
+    public void M39_DateTimeValuesInTheYears1To99_AreAnArgumentException()
+    {
+        foreach (var year in new[] { 1, 50, 99, 100 })
+        {
+            var value = new DateTime(year, 6, 15, 0, 0, 0, DateTimeKind.Utc);
+            Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", value))))));
+            Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", new DateTimeOffset(value)))))));
+        }
+    }
 }

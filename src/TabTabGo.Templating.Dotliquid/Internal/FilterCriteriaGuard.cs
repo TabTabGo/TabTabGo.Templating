@@ -182,7 +182,7 @@ internal static class FilterCriteriaGuard
             var body = new Checker().Visit(lambda.Body)!;
             return Expression.Lambda<Func<Hash, bool>>(body, lambda.Parameters).Compile();
         }
-        catch (Exception ex) when (ex is not ArgumentException and not InsufficientExecutionStackException)
+        catch (Exception ex) when (ex is not ArgumentException and not InsufficientExecutionStackException and not OutOfMemoryException)
         {
             // an expression that parses but does not type-check ("renew == 1": Equal is not defined for Object and Int32) or compile surfaces as one catchable, short, path-free error
             var message = ex.Message.ReplaceLineEndings(" ");
