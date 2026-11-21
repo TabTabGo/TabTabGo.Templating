@@ -9,17 +9,6 @@ namespace TabTabGo.Templating.Liquid.Filters;
 /// <summary>Filters over lists of hashes and values.</summary>
 public static class CollectionFilters
 {
-    /// <summary>
-    /// Parsing rules for the <c>Filter</c> filter (ADR 0002). System.Linq.Dynamic.Core 1.6+ blocks
-    /// <c>ToString()</c>/<c>Equals()</c> on <c>object</c> by default, which existing templates rely on
-    /// (<c>it["k"].ToString() = "v"</c>). Reflection over types outside the predefined set stays blocked.
-    /// </summary>
-    private static readonly ParsingConfig DynamicLinqParsingConfig = new()
-    {
-        AllowEqualsAndToStringMethodsOnObject = true,
-        AllowNewToEvaluateAnyType = false,
-    };
-
     /// <summary>Collects the value of <paramref name="property"/> from every hash in the list (items that are not hashes, and missing values, are skipped).</summary>
     /// <param name="array">The list.</param>
     /// <param name="property">The member name.</param>
@@ -95,10 +84,10 @@ public static class CollectionFilters
 
     /// <summary>Keeps the items that satisfy a System.Linq.Dynamic.Core expression (<c>it["k"].ToString() = "v"</c>).</summary>
     /// <param name="array">The list of hashes.</param>
-    /// <param name="criteria">The expression. Do not build it from untrusted data; prefer <see cref="FilterBy"/>. It may not call
-    /// <c>PadLeft</c>, <c>PadRight</c>, <c>Replace</c>, <c>Repeat</c>, <c>Insert</c>, <c>Concat</c>, <c>Join</c> or <c>Format</c>, and no method may be
-    /// given a number above 10,000: those allocate outside the output limit.</param>
-    /// <exception cref="ArgumentException">The expression calls a blocked method or passes a number above the cap.</exception>
+    /// <param name="criteria">The expression. Do not build it from untrusted data; prefer <see cref="FilterBy"/>. It is checked against an
+    /// allow-list (<c>ToString()</c>, <c>Equals</c>, the comparison and search methods of string, <c>Math</c> and <c>Convert</c> conversions, indexers); anything that grows a
+    /// string (<c>PadLeft</c>, <c>Replace</c>, <c>Insert</c>, <c>Concat</c>, <c>Join</c>, <c>Format</c>, <c>+</c>) is refused because it allocates outside the output limit.</param>
+    /// <exception cref="ArgumentException">The expression uses a method, member or node outside the allow-list, concatenates strings, or passes a computed or huge number to a string method.</exception>
     public static object? Filter(IEnumerable? array, string criteria)
     {
         if (array == null)
@@ -106,9 +95,7 @@ public static class CollectionFilters
             return null;
         }
 
-        FilterCriteriaGuard.Validate(criteria);
-
-        return array.Cast<Hash>().AsQueryable().Where(DynamicLinqParsingConfig, criteria).ToList();
+        return array.Cast<Hash>().Where(FilterCriteriaGuard.Compile(criteria)).ToList();
     }
 
     /// <summary>
