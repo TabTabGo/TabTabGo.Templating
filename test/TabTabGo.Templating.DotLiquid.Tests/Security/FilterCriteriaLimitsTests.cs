@@ -487,7 +487,7 @@ public class FilterCriteriaLimitsTests
 
     [Theory]
     [MemberData(nameof(EligibleShapes))]
-    public void F1_EligibleShapes_ParseOnA256KbCallerStack_AndOnA300KbOneWithHalfConsumed(string expression)
+    public void F1_EligibleShapes_AreAcceptedOnSmallThreads_WhereTheProbeDeclinesAndTheLargeStackThreadParses(string expression)
     {
         Assert.True(expression.Length <= FilterCriteriaGuard.ShallowCharacters, expression.Length.ToString());
 
@@ -684,5 +684,91 @@ public class FilterCriteriaLimitsTests
         Assert.IsType<ArgumentException>(ex);
         Assert.True(ex!.Message.Length < 400, ex.Message);
         Assert.Null(ex.InnerException);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> on a dedicated thread at every stack depth, in 4 KB steps, for as long as the margin probe still says yes: the last runs happen with the least stack the
+    /// probe admits, which is what a request thread deep in the host's own recursion looks like, and what x64 CI runs.
+    /// </summary>
+    private static int AtEveryDepthWhereTheProbeSaysYes(Action work)
+    {
+        var runs = 0;
+        Exception? error = null;
+
+        void Descend()
+        {
+            Span<byte> frame = stackalloc byte[4096];
+            frame[0] = 1;
+            frame[^1] = 1;
+            if (!FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels))
+            {
+                return;
+            }
+
+            runs++;
+            work();
+            Descend();
+            if (frame[0] != 1)
+            {
+                throw new InvalidOperationException();
+            }
+        }
+
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    Descend();
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+            },
+            maxStackSize: 1024 * 1024);
+        thread.Start();
+        thread.Join();
+        if (error != null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        }
+
+        return runs;
+    }
+
+    public static IEnumerable<object[]> ShapesForTheSmallestAdmittedStack()
+    {
+        foreach (var shape in EligibleShapes())
+        {
+            yield return shape;
+        }
+
+        yield return new object[] { Repeat("int(", 8) + "1" + Repeat(")", 8) };
+        yield return new object[] { Repeat("np(", 8) + "1" + Repeat(")", 8) };
+        yield return new object[] { Repeat("-(", 8) + "1" + Repeat(")", 8) };
+        yield return new object[] { Repeat("Math.Abs(", 8) + "1" + Repeat(")", 8) };
+        yield return new object[] { Repeat("iif(true,", 8) + "1" + Repeat(",1)", 8) };
+        yield return new object[] { "((((((((1))))))))" };
+    }
+
+    [Theory]
+    [MemberData(nameof(ShapesForTheSmallestAdmittedStack))]
+    public void M35_EligibleShapes_NeverCrash_OnTheSmallestStackTheProbeAdmits(string expression)
+    {
+        var failures = new List<string>();
+
+        var runs = AtEveryDepthWhereTheProbeSaysYes(() =>
+        {
+            FilterCriteriaGuard.ClearCache();
+            var outcome = Record.Exception(() => CollectionFilters.Filter(Rows(), expression));
+            if (outcome is InsufficientExecutionStackException)
+            {
+                failures.Add(outcome.ToString());
+            }
+        });
+
+        Assert.True(runs > 20, $"only {runs} depths ran");
+        Assert.Empty(failures);
     }
 }

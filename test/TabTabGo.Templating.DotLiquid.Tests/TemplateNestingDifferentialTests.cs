@@ -146,4 +146,28 @@ public sealed class TemplateNestingDifferentialTests
         Assert.Equal(500, TemplateNesting.Depth(TemplateNesting.Tokens(template, real), int.MaxValue));
         Assert.Equal(500, TemplateNesting.Depth(TemplateNesting.Tokens(template, null), int.MaxValue));
     }
+
+    [Fact]
+    public void M37_RepeatedUnclosedCommentShorthand_IsLinearInTheFallbackScan()
+    {
+        var template = string.Concat(Enumerable.Repeat("{#", 131_072)); // 262,144 characters
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var tokens = TemplateNesting.Tokens(template, null);
+        var depth = TemplateNesting.Depth(tokens, int.MaxValue);
+
+        watch.Stop();
+        Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(200), $"took {watch.Elapsed}");
+        Assert.Equal(0, depth);
+    }
+
+    [Fact]
+    public void M37_UnclosedShorthandsThenDeepNesting_AreStillCounted_AndAClosedOneStillCloses()
+    {
+        var unclosed = string.Concat(Enumerable.Repeat("{# ", 1_000)) + string.Concat(Enumerable.Repeat("{% if a %}", 500)) + string.Concat(Enumerable.Repeat("{% endif %}", 500));
+        var closed = "{# a #}{% if a %}{# b #}{% endif %}";
+
+        Assert.Equal(500, TemplateNesting.Depth(TemplateNesting.Tokens(unclosed, null), int.MaxValue));
+        Assert.Equal(2, TemplateNesting.Depth(TemplateNesting.Tokens(closed, null), int.MaxValue)); // a comment block inside the if
+    }
 }
