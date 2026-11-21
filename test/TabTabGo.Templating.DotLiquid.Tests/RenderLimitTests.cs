@@ -134,6 +134,16 @@ public sealed class RegexTimeoutScopeTests
     }
 
     [Fact]
+    public void MaxTemplateCharacters_DefaultsTo262144_AndATemplateJustOverIsRejected()
+    {
+        Assert.Equal(262_144, new TemplatingOptions().MaxTemplateCharacters);
+        var engine = new Liquid.TemplatingEngine(new TemplatingOptions());
+
+        Assert.Equal(new string('x', 262_144), engine.RenderString(new string('x', 262_144), new { }));
+        Assert.Throws<RenderLimitExceededException>(() => engine.RenderString(new string('x', 262_145), new { }));
+    }
+
+    [Fact]
     public void ParseTimeout_AndMaxTemplateCharacters_AreValidated()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new Liquid.TemplatingEngine(new TemplatingOptions { ParseTimeout = TimeSpan.Zero }));

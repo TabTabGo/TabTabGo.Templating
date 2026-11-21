@@ -39,10 +39,20 @@ internal static class TemplateNesting
         // over Tokenizer.Tokenize(source, level) (verified in 2.3.260's IL: ParseInternal does nothing else; Literal.FromShortHand and Comment.FromShortHand, the whitespace-control
         // rewrite and the end-of-tag checks all run inside Tokenize, so one preprocessed string feeds both the scan and the parser). Doing those steps here lets the scan and the parser share one token list (the tokenizer is superlinear, so a second
         // pass doubled the parse cost). The tests compare the resulting tree with Template.Parse.
-        var tokens = Tokens(template);
-        if (Depth(tokens, maxDepth) > maxDepth)
+        // only the DotLiquid the shared-token path was verified against; any other version takes the stock Template.Parse (scan, then parse) so a bumped DotLiquid cannot change the tree
+        var shared = SharedTokenParseSupported(typeof(Template).Assembly.GetName().Version);
+        List<string>? tokens = null;
+        if (shared)
         {
-            throw new SyntaxException($"The template nests blocks deeper than {maxDepth} levels (TemplatingOptions.MaxNestingDepth).");
+            tokens = Tokens(template);
+            if (Depth(tokens, maxDepth) > maxDepth)
+            {
+                throw new SyntaxException($"The template nests blocks deeper than {maxDepth} levels (TemplatingOptions.MaxNestingDepth).");
+            }
+        }
+        else
+        {
+            Check(template, maxDepth);
         }
 
         Template? parsed = null;
@@ -56,10 +66,17 @@ internal static class TemplateNesting
                 {
                     CultureInfo.CurrentCulture = culture;
                     CultureInfo.CurrentUICulture = uiCulture;
-                    var result = (Template)Activator.CreateInstance(typeof(Template), nonPublic: true)!; // the constructor is internal
-                    result.Root = new Document();
-                    result.Root.Initialize(null, null, tokens); // consumes the list
-                    parsed = result;
+                    if (tokens != null)
+                    {
+                        var result = (Template)Activator.CreateInstance(typeof(Template), nonPublic: true)!; // the constructor is internal
+                        result.Root = new Document();
+                        result.Root.Initialize(null, null, tokens); // consumes the list
+                        parsed = result;
+                    }
+                    else
+                    {
+                        parsed = Template.Parse(template);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -76,6 +93,10 @@ internal static class TemplateNesting
 
         return parsed!;
     }
+
+    /// <summary>True only for DotLiquid 2.3.260, the version whose <c>Template.Parse</c> the shared-token parse was verified against.</summary>
+    /// <param name="version">The loaded DotLiquid assembly version.</param>
+    internal static bool SharedTokenParseSupported(Version? version) => version is { Major: 2, Minor: 3, Build: 260 };
 
     /// <summary>Throws <see cref="SyntaxException"/> when <paramref name="template"/> nests blocks deeper than <paramref name="maxDepth"/>.</summary>
     /// <param name="template">The template text.</param>
