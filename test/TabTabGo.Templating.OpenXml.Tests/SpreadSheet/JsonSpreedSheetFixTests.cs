@@ -505,6 +505,8 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     [InlineData("-1")]
     [InlineData("\"abc\"")]
     [InlineData("true")]
+    [InlineData("65535")]
+    [InlineData("4294967295")]
     [InlineData("9223372036854775808")]
     [InlineData("123456789012345678901234567890")]
     [InlineData("1e300")]
@@ -563,5 +565,42 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         {
             System.Globalization.CultureInfo.CurrentCulture = previous;
         }
+    }
+
+    private const string Big = "1000000000000000000000000000000";
+
+    [Fact]
+    public void B2_SheetId_65534_IsTheLargestAccepted()
+    {
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 65534, ["Name"] = "A" })), stream);
+
+        Assert.Equal(65534u, document.WorkbookPart!.Workbook!.Descendants<Sheet>().Single().SheetId!.Value);
+    }
+
+    [Theory]
+    [InlineData("SheetId", Big)]
+    [InlineData("SheetId", "-" + Big)]
+    [InlineData("StyleIndex", Big)]
+    [InlineData("StyleIndex", "-" + Big)]
+    [InlineData("StyleIndex", "-1")]
+    [InlineData("StyleIndex", "1.5")]
+    [InlineData("StyleIndex", "\"abc\"")]
+    [InlineData("Number", "\"NaN\"")]
+    [InlineData("Boolean", Big)]
+    [InlineData("Boolean", "7")]
+    public void B1_EveryNumericConversion_ThrowsArgumentException_AndNothingElse(string target, string valueJson)
+    {
+        var value = JToken.Parse(valueJson);
+        var workbook = target switch
+        {
+            "SheetId" => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = value, ["Name"] = "A" })),
+            "StyleIndex" => Workbook(new JArray(Row(new JObject { ["CellValue"] = "x", ["StyleIndex"] = value }))),
+            "Number" => Workbook(new JArray(Row(new JObject { ["DataType"] = "Number", ["CellValue"] = value }))),
+            _ => Workbook(new JArray(Row(new JObject { ["DataType"] = "Boolean", ["CellValue"] = value }))),
+        };
+        using var stream = new MemoryStream();
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(stream, workbook));
     }
 }

@@ -306,7 +306,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         {
             if (jCell["StyleIndex"] != null)
             {
-                var explicitIndex = Convert.ToUInt32(jCell["StyleIndex"]);
+                var explicitIndex = ReadWholeNumber(jCell["StyleIndex"], "StyleIndex", 0, uint.MaxValue) ?? 0;
                 if (explicitIndex >= Math.Max(styleCount, 1))
                 {
                     throw new ArgumentException($"StyleIndex {explicitIndex} is outside the stylesheet's {styleCount} cell formats.", "json");
@@ -332,10 +332,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             {
                 if (useAlternative && map["SAlternativeIndex"] != null)
                 {
-                    return UInt32Value.FromUInt32(Convert.ToUInt32(map["SAlternativeIndex"]));
+                    return UInt32Value.FromUInt32(ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0);
                 }
 
-                return UInt32Value.FromUInt32(Convert.ToUInt32(map["SIndex"]));
+                return UInt32Value.FromUInt32(ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0);
             }
 
             return UInt32Value.FromUInt32(0);
@@ -419,7 +419,16 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             return false;
         }
 
-        private static uint? ReadSheetId(JToken? token)
+        /// <summary>The largest SheetId the schema allows (the validator rejects anything above 65534).</summary>
+        private const uint MaxSheetId = 65534;
+
+        private static uint? ReadSheetId(JToken? token) => ReadWholeNumber(token, "SheetId", 1, MaxSheetId);
+
+        /// <summary>
+        /// A whole number read from JSON (an integer, an integral float, or numeric text) within <paramref name="min"/> and <paramref name="max"/>; null for a missing or null value.
+        /// Every failure (a BigInteger beyond any type, negative, fractional, NaN, text) is an <see cref="ArgumentException"/>, never an InvalidCast, Format or Overflow exception.
+        /// </summary>
+        private static uint? ReadWholeNumber(JToken? token, string what, double min, double max)
         {
             if (token == null || token.Type == JTokenType.Null)
             {
@@ -436,17 +445,17 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 }
                 else if (token.Type != JTokenType.String || !double.TryParse(token.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out number))
                 {
-                    throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+                    throw new ArgumentException($"{what} must be a number ({token}).", "json");
                 }
             }
             catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
             {
-                throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json", ex);
+                throw new ArgumentException($"{what} must be a number ({token}).", "json", ex);
             }
 
-            if (!(number >= 1 && number <= uint.MaxValue) || number != Math.Floor(number))
+            if (!(number >= min && number <= max) || number != Math.Floor(number))
             {
-                throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json");
+                throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} to {max.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} ({token}).", "json");
             }
 
             return (uint)number;
