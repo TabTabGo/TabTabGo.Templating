@@ -303,7 +303,13 @@ public class JsonSpreedSheet
 
             if (jColumn["Width"] != null)
             {
-                column.Width = DoubleValue.FromDouble(ReadDouble(jColumn["Width"]!, "Column Width"));
+                var width = ReadDouble(jColumn["Width"]!, "Column Width");
+                if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
+                {
+                    throw new ArgumentException($"Column Width must be a number from 0 to 255 ({jColumn["Width"]}).", "json");
+                }
+
+                column.Width = DoubleValue.FromDouble(width);
                 column.CustomWidth = true;
             }
 

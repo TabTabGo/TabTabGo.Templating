@@ -412,6 +412,7 @@ public class FilterCriteriaLimitsTests
     }
 
     /// <summary>Burns about <paramref name="kilobytes"/> of the current thread's stack (16 KB frames) and then runs <paramref name="action"/>, like a host that is already deep in recursion.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining | System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)]
     private static T WithStackConsumed<T>(int kilobytes, Func<T> action)
     {
         if (kilobytes <= 0)
@@ -420,10 +421,29 @@ public class FilterCriteriaLimitsTests
         }
 
         Span<byte> frame = stackalloc byte[16 * 1024];
-        frame[0] = 1;
-        frame[^1] = 1;
+        TouchEveryPage(frame); // a real, committed frame: neither inlined nor optimised away by tiered compilation, on any platform
         var result = WithStackConsumed(kilobytes - 16, action);
         return frame[0] == 1 ? result : default!;
+    }
+
+    private static void TouchEveryPage(Span<byte> frame)
+    {
+        for (var i = 0; i < frame.Length; i += 4096)
+        {
+            Volatile.Write(ref frame[i], 1);
+        }
+
+        Volatile.Write(ref frame[^1], 1);
+    }
+
+    /// <summary>Consumes 16 KB frames until the margin probe flips to false; returns how many frames that took (measured on this thread, so it does not depend on the platform's stack rounding).</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining | System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)]
+    private static int FramesUntilTheMarginIsLost(int framesSoFar)
+    {
+        Span<byte> frame = stackalloc byte[16 * 1024];
+        TouchEveryPage(frame);
+        var total = FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels) ? FramesUntilTheMarginIsLost(framesSoFar + 1) : framesSoFar;
+        return frame[0] == 1 ? total : -1;
     }
 
     private static T OnStack<T>(int kilobytes, int consumedKilobytes, Func<T> action)
@@ -559,7 +579,12 @@ public class FilterCriteriaLimitsTests
     public void F1_StackMargin_IsTrueWithRoomAndFalseWhenHalfTheStackIsGone()
     {
         Assert.True(OnStack(1024, 0, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
-        Assert.False(OnStack(300, 100, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
+
+        // relative, measured on the thread itself: on a 512 KB thread the probe (it wants 256 KB free) must flip after the thread has consumed roughly 150 to 330 KB of its own stack,
+        // whatever the platform rounds the stack to and however the JIT tiers; and it must stay false deeper (the recursion only continues while it says yes)
+        var frames = OnStack(512, 0, () => FramesUntilTheMarginIsLost(0));
+        Assert.InRange(frames * 16, 100, 350);
+        Assert.False(OnStack(512, frames * 16 + 32, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
     }
 
     [Fact]
@@ -695,11 +720,11 @@ public class FilterCriteriaLimitsTests
         var runs = 0;
         Exception? error = null;
 
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining | System.Runtime.CompilerServices.MethodImplOptions.NoOptimization)]
         void Descend()
         {
             Span<byte> frame = stackalloc byte[4096];
-            frame[0] = 1;
-            frame[^1] = 1;
+            TouchEveryPage(frame);
             if (!FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels))
             {
                 return;
