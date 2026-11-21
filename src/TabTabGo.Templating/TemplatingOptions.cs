@@ -53,6 +53,8 @@ namespace TabTabGo.Templating
         /// <summary>
         /// Deepest nesting of block tags (<c>if</c>, <c>for</c>, custom blocks ...) a template may have. DotLiquid's parser recurses once per level, so thousands of nested
         /// blocks overflow the stack and end the process. Checked by a linear scan before parsing. Must be at least 1. Default 100.
+        /// There is no upper bound: the parse stack grows with the limit (8 KB per level) until it stops at 32,704 levels, where the 256 MB cap holds to roughly 400,000 levels of the
+        /// measured parser cost; parse cost grows too (about 4 to 9 s of CPU at 20,000 levels), and rendering runs on the caller's stack, so keep the default unless the host renders on large-stack threads.
         /// </summary>
         public int MaxNestingDepth { get; set; } = 100;
 

@@ -44,7 +44,15 @@ public class EnhancedLocalFileSystem : IFileSystem
             throw new FileSystemException("Illegal template path", templatePath);
         }
 
-        return File.ReadAllText(fullPath);
+        try
+        {
+            return File.ReadAllText(fullPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // a dangling link, a file that vanished or one that cannot be read: the system message carries the absolute path, ours does not
+            throw new FileSystemException("Template not found", templatePath);
+        }
     }
 
     /// <summary>Resolves a partial name (<c>part</c> or <c>folder/part</c>) to its <c>_part.liquid</c> path inside the root.</summary>

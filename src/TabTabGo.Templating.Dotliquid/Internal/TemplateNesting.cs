@@ -24,6 +24,9 @@ internal static class TemplateNesting
     // tags that continue a block instead of opening one; answered without asking DotLiquid (it throws for a name it does not register, which is slow in a loop)
     private static readonly HashSet<string> Continuations = new(StringComparer.Ordinal) { "else", "elsif", "elseif", "when", "break", "continue" };
 
+    // DotLiquid's built-in block tags; they open a block level even when the tag registry is cold
+    private static readonly HashSet<string> BuiltInBlocks = new(StringComparer.Ordinal) { "if", "unless", "case", "for", "tablerow", "capture", "raw", "comment", "ifchanged" };
+
     // registered names are stable for the life of the process (a name may be registered later, never removed), so only positive answers are kept
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> KnownBlocks = new(StringComparer.Ordinal);
 
@@ -176,7 +179,13 @@ internal static class TemplateNesting
     /// <summary>The scan over tokens already produced by <see cref="Tokens(string)"/>.</summary>
     /// <param name="tokens">The tokens.</param>
     /// <param name="stopAfter">Depth at which to stop counting.</param>
-    internal static int Depth(List<string> tokens, int stopAfter)
+    internal static int Depth(List<string> tokens, int stopAfter) => Depth(tokens, stopAfter, null);
+
+    /// <summary>The scan with the tag lookup chosen by the caller (tests pass one that fails, to prove the built-in blocks do not depend on DotLiquid's registry).</summary>
+    /// <param name="tokens">The tokens.</param>
+    /// <param name="stopAfter">Depth at which to stop counting.</param>
+    /// <param name="tagLookup">Resolves a tag name to its type, or throws <see cref="NullReferenceException"/> when it is not registered; null uses <c>Template.GetTagType</c>.</param>
+    internal static int Depth(List<string> tokens, int stopAfter, Func<string, Type?>? tagLookup)
     {
         var open = new Stack<string>();
         var notBlocks = new HashSet<string>(StringComparer.Ordinal); // per scan: an unregistered name is looked up once
@@ -213,7 +222,7 @@ internal static class TemplateNesting
             if (name is "raw" or "comment")
             {
                 skipUntil = "end" + name;
-                if (IsBlock(name, notBlocks))
+                if (IsBlock(name, notBlocks, tagLookup))
                 {
                     open.Push(name); // a block level for the parser even though its body is one text token
                     deepest = Math.Max(deepest, open.Count);
@@ -226,7 +235,7 @@ internal static class TemplateNesting
             {
                 open.Pop();
             }
-            else if (IsBlock(name, notBlocks))
+            else if (IsBlock(name, notBlocks, tagLookup))
             {
                 open.Push(name);
                 deepest = Math.Max(deepest, open.Count);
@@ -268,6 +277,21 @@ internal static class TemplateNesting
             }
 
             var kind = template[open + 1];
+            if (kind == '#')
+            {
+                // the {# ... #} shorthand is a comment block for DotLiquid's parser (it rewrites it to {% comment %}...{% endcomment %})
+                var close = template.IndexOf("#}", open + 2, StringComparison.Ordinal);
+                if (close < 0)
+                {
+                    break;
+                }
+
+                tokens.Add("{% comment %}");
+                tokens.Add("{% endcomment %}");
+                i = close + 2;
+                continue;
+            }
+
             if (kind is not ('%' or '{'))
             {
                 i = open + 1;
@@ -292,8 +316,13 @@ internal static class TemplateNesting
 
     private static long _registryLookups;
 
-    private static bool IsBlock(string name, HashSet<string> notBlocks)
+    private static bool IsBlock(string name, HashSet<string> notBlocks, Func<string, Type?>? tagLookup)
     {
+        if (BuiltInBlocks.Contains(name))
+        {
+            return true; // by name, whatever the registry holds: a cold or changed registry must never make the scan blind to the common blocks
+        }
+
         if (Continuations.Contains(name) || notBlocks.Contains(name))
         {
             return false;
@@ -308,12 +337,14 @@ internal static class TemplateNesting
         try
         {
             Interlocked.Increment(ref _registryLookups);
-            type = Template.GetTagType(name);
+            type = (tagLookup ?? Template.GetTagType)(name);
         }
         catch (NullReferenceException)
         {
+            // DotLiquid 2.3 throws, instead of returning null, for a name that is not a registered tag; only this scan remembers it (never the process-wide cache),
+            // and the built-in blocks never get here
             notBlocks.Add(name);
-            return false; // DotLiquid 2.3 throws, instead of returning null, for a name that is not a registered tag
+            return false;
         }
 
         if (type != null && typeof(Block).IsAssignableFrom(type))

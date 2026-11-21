@@ -63,11 +63,11 @@ public sealed class JsonSpreedSheetCellTests
     }
 
     [Fact]
-    public void Booleans_AreStoredAsOneOrZero_AndOtherTextIsKept()
+    public void Booleans_AreStoredAsOneOrZero()
     {
-        var cells = Cells(Workbook(new JArray(Row(Cell("Boolean", true), Cell("boolean", "false"), Cell("Boolean", "maybe")))));
+        var cells = Cells(Workbook(new JArray(Row(Cell("Boolean", true), Cell("boolean", "false"), Cell("Boolean", " TRUE ")))));
 
-        Assert.Equal(new[] { "1", "0", "maybe" }, cells.Select(c => c.CellValue!.Text));
+        Assert.Equal(new[] { "1", "0", "1" }, cells.Select(c => c.CellValue!.Text));
         Assert.All(cells, c => Assert.Equal(CellValues.Boolean, c.DataType!.Value));
     }
 
@@ -79,7 +79,6 @@ public sealed class JsonSpreedSheetCellTests
             Cell("Date", new DateTime(2024, 3, 5, 0, 0, 0, DateTimeKind.Utc), format: "No Such"),
             Cell("Date", offset),
             Cell("Date", "5 March 2024"),
-            Cell("Date", "not a date"),
             Cell("Date", ""),
             Cell("Date", null),
             Cell("Date", new DateTime(2024, 3, 5, 0, 0, 0, DateTimeKind.Utc), style: 4)))));
@@ -87,10 +86,10 @@ public sealed class JsonSpreedSheetCellTests
         Assert.Equal("45356", cells[0].CellValue!.Text);
         Assert.Equal("45355.833333333336", cells[1].CellValue!.Text);
         Assert.Equal("45356", cells[2].CellValue!.Text);
-        Assert.All(cells.Skip(3).Take(3), c => { Assert.Null(c.CellValue); Assert.Null(c.DataType); }); // B1: an empty date is an empty cell, not <c t="n"><v/></c>
-        Assert.All(cells.Take(3).Append(cells[6]), c => Assert.Equal(CellValues.Number, c.DataType!.Value));
+        Assert.All(cells.Skip(3).Take(2), c => { Assert.Null(c.CellValue); Assert.Null(c.DataType); }); // B1: an empty date is an empty cell, not <c t="n"><v/></c>
+        Assert.All(cells.Take(3).Append(cells[5]), c => Assert.Equal(CellValues.Number, c.DataType!.Value));
         Assert.Equal(5u, cells[0].StyleIndex!.Value); // no style found: the built-in date style
-        Assert.Equal(4u, cells[6].StyleIndex!.Value);                                    // a named style wins
+        Assert.Equal(4u, cells[5].StyleIndex!.Value);                                    // a named style wins
     }
 
     [Fact]

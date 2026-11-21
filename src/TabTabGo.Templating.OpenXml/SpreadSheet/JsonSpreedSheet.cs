@@ -15,6 +15,11 @@ public class JsonSpreedSheet
     internal const uint DefaultDateStyleIndex = 5;
 
     private const int MaxSheetNameLength = 31;
+
+    /// <summary>The most sheets this writer accepts. Excel's practical limit is far lower (memory); 255 is the hard ceiling here and keeps the id/name generation trivial.</summary>
+    internal const int MaxSheets = 255;
+
+    private const double MaxDateSerial = 2958465; // 9999-12-31
     private static readonly char[] InvalidSheetNameChars = { '[', ']', ':', '*', '?', '/', '\\' };
     private static readonly string[] ErrorLiterals = { "#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!" };
 
@@ -65,6 +70,11 @@ public class JsonSpreedSheet
             throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", nameof(json));
         }
 
+        if (jSheets.Count > MaxSheets)
+        {
+            throw new ArgumentException($"The workbook may define at most {MaxSheets} sheets.", nameof(json));
+        }
+
         var sheetIds = ResolveSheetIds(jSheets);
         var sheetNames = ResolveSheetNames(jSheets);
 
@@ -111,14 +121,14 @@ public class JsonSpreedSheet
         workbookPart.Workbook.Save();
     }
 
-    /// <summary>Explicit ids are kept (and must be unique); generated ids skip every explicit one so they never collide.</summary>
+    /// <summary>Explicit ids are kept (and must be unique, whole numbers from 1); generated ids skip every explicit one so they never collide (linear: one running counter).</summary>
     private static List<uint> ResolveSheetIds(List<JToken> jSheets)
     {
         var used = new HashSet<uint>();
         var ids = new uint?[jSheets.Count];
         for (var i = 0; i < jSheets.Count; i++)
         {
-            ids[i] = (uint?)jSheets[i]["SheetId"];
+            ids[i] = ReadSheetId(jSheets[i]["SheetId"]);
             if (ids[i] is { } explicitId && !used.Add(explicitId))
             {
                 throw new ArgumentException($"SheetId {explicitId} is used by more than one sheet.", "json");
@@ -126,6 +136,7 @@ public class JsonSpreedSheet
         }
 
         var result = new List<uint>(jSheets.Count);
+        uint next = 1; // never goes back: each generated id is the sheet's position, or later, past every id already taken
         for (var i = 0; i < ids.Length; i++)
         {
             if (ids[i] is { } known)
@@ -134,20 +145,49 @@ public class JsonSpreedSheet
                 continue;
             }
 
-            var next = (uint)(i + 1); // the sheet's position, moved up past every id already taken
+            next = Math.Max(next, (uint)(i + 1));
             while (used.Contains(next))
             {
                 next++;
             }
 
             used.Add(next);
-            result.Add(next);
+            result.Add(next++);
         }
 
         return result;
     }
 
-    /// <summary>Explicit names are validated and must be unique ignoring case; a sheet without a name gets the first free "SheetN" from its position.</summary>
+    private static uint? ReadSheetId(JToken? token)
+    {
+        if (token == null || token.Type == JTokenType.Null)
+        {
+            return null;
+        }
+
+        double number;
+        switch (token.Type)
+        {
+            case JTokenType.Integer:
+            case JTokenType.Float:
+                number = Convert.ToDouble(((JValue)token).Value, CultureInfo.InvariantCulture);
+                break;
+            case JTokenType.String when double.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed):
+                number = parsed;
+                break;
+            default:
+                throw new ArgumentException("SheetId must be a whole number from 1.", "json");
+        }
+
+        if (number < 1 || number > uint.MaxValue || number != Math.Floor(number))
+        {
+            throw new ArgumentException($"SheetId must be a whole number from 1 ({token}).", "json");
+        }
+
+        return (uint)number;
+    }
+
+    /// <summary>Explicit names are validated and must be unique ignoring case; a sheet without a name gets the first free "SheetN" from its position (linear: one running counter).</summary>
     private static List<string> ResolveSheetNames(List<JToken> jSheets)
     {
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -162,6 +202,7 @@ public class JsonSpreedSheet
         }
 
         var result = new List<string>(jSheets.Count);
+        var next = 1;
         for (var i = 0; i < names.Length; i++)
         {
             if (names[i] is { } known)
@@ -170,13 +211,14 @@ public class JsonSpreedSheet
                 continue;
             }
 
-            var number = i + 1;
-            while (!used.Add("Sheet" + number.ToString(CultureInfo.InvariantCulture)))
+            next = Math.Max(next, i + 1);
+            while (!used.Add("Sheet" + next.ToString(CultureInfo.InvariantCulture)))
             {
-                number++;
+                next++;
             }
 
-            result.Add("Sheet" + number.ToString(CultureInfo.InvariantCulture));
+            result.Add("Sheet" + next.ToString(CultureInfo.InvariantCulture));
+            next++;
         }
 
         return result;
@@ -187,11 +229,12 @@ public class JsonSpreedSheet
         if (string.IsNullOrWhiteSpace(name)
             || name.Length > MaxSheetNameLength
             || name.IndexOfAny(InvalidSheetNameChars) >= 0
+            || HasControlOrLoneSurrogate(name)
             || name[0] == '\'' || name[^1] == '\''
             || name.Equals("History", StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException(
-                $"A sheet name must be 1 to {MaxSheetNameLength} characters, may not contain any of [ ] : * ? / \\, may not start or end with an apostrophe, and may not be 'History'.",
+                $"A sheet name must be 1 to {MaxSheetNameLength} characters, may not contain any of [ ] : * ? / \\, may not start or end with an apostrophe, may not be 'History', and may not contain control characters or lone surrogates.",
                 "json");
         }
 
@@ -252,6 +295,28 @@ public class JsonSpreedSheet
         return worksheet;
     }
 
+    private static bool HasControlOrLoneSurrogate(string name)
+    {
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (char.IsControl(name[i]))
+            {
+                return true;
+            }
+
+            if (char.IsHighSurrogate(name[i]) && i + 1 < name.Length && char.IsLowSurrogate(name[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(name[i]))
+            {
+                return true; // a lone surrogate cannot be written to XML
+            }
+        }
+
+        return false;
+    }
+
     private static Cell ConstructCell(JToken jCell, JArray styleMap, int rowIndex, uint? defaultDateStyle, uint styleCount)
     {
         var dataType = ParseDataType(jCell["DataType"]?.ToString());
@@ -279,9 +344,21 @@ public class JsonSpreedSheet
         }
 
         var text = CellValueWriter.ToValidXml(value is JValue { Value: null } or null ? string.Empty : Invariant(value));
-        if (dataType == CellValues.Boolean)
+        if (dataType == CellValues.Boolean && !string.IsNullOrWhiteSpace(text))
         {
-            text = bool.TryParse(text, out var flag) ? (flag ? "1" : "0") : text; // a boolean cell holds 1 or 0
+            text = text.Trim().ToLowerInvariant() switch
+            {
+                "true" or "1" => "1",
+                "false" or "0" => "0",
+                _ => throw new ArgumentException("A Boolean cell must hold true, false, 1 or 0.", "json"),
+            };
+        }
+        else if (dataType == CellValues.Number && !string.IsNullOrWhiteSpace(text))
+        {
+            // the canonical invariant round-trip form; text that is not a finite number would write an invalid workbook
+            text = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number)
+                ? number.ToString("R", CultureInfo.InvariantCulture)
+                : throw new ArgumentException("A Number cell must hold a finite number.", "json");
         }
 
         if (dataType == CellValues.InlineString || dataType == CellValues.SharedString)
@@ -298,7 +375,7 @@ public class JsonSpreedSheet
             throw new ArgumentException("An Error cell must hold one of #N/A, #REF!, #VALUE!, #DIV/0!, #NAME?, #NUM!, #NULL!.", "json");
         }
 
-        if (text.Length == 0 && (dataType == CellValues.Number || dataType == CellValues.Boolean))
+        if (string.IsNullOrWhiteSpace(text) && (dataType == CellValues.Number || dataType == CellValues.Boolean))
         {
             // an empty number or boolean is an empty cell: <c t="n"><v/></c> is not valid (it keeps its style)
             cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
@@ -311,9 +388,13 @@ public class JsonSpreedSheet
         return cell;
     }
 
+    /// <summary>
+    /// The Excel serial of a date cell: a date value, a date text, or a number (or numeric text) from 1 to 2958465 taken as the serial itself. Empty is empty;
+    /// anything else throws, because dropping it would lose the data without a trace.
+    /// </summary>
     private static string DateSerial(JToken? value)
     {
-        if (value == null || value.Type == JTokenType.Null || (value.Type == JTokenType.String && string.IsNullOrEmpty(value.ToString())))
+        if (value == null || value.Type == JTokenType.Null || (value.Type == JTokenType.String && string.IsNullOrWhiteSpace(value.ToString())))
         {
             return string.Empty;
         }
@@ -328,9 +409,19 @@ public class JsonSpreedSheet
             return dateTimeOffset.UtcDateTime.ToOADate().ToString("R", CultureInfo.InvariantCulture);
         }
 
-        return DateTime.TryParse(value.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
+        var text = value.ToString();
+        if (value.Type is JTokenType.Integer or JTokenType.Float
+            || (value.Type == JTokenType.String && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
+        {
+            var serial = Convert.ToDouble(value.Type == JTokenType.String ? text : ((JValue)value).Value, CultureInfo.InvariantCulture);
+            return serial >= 1 && serial <= MaxDateSerial
+                ? serial.ToString("R", CultureInfo.InvariantCulture)
+                : throw new ArgumentException($"A Date cell holding a number must be an Excel serial from 1 to {MaxDateSerial.ToString("0", CultureInfo.InvariantCulture)} ({text}).", "json");
+        }
+
+        return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
             ? parsed.ToOADate().ToString("R", CultureInfo.InvariantCulture)
-            : string.Empty;
+            : throw new ArgumentException($"A Date cell must hold a date, or an Excel serial number ({text}).", "json");
     }
 
     private static string Invariant(JToken value) => value is JValue { Value: IFormattable formattable }

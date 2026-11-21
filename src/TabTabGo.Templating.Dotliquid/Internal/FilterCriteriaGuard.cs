@@ -33,6 +33,16 @@ internal static class FilterCriteriaGuard
     /// <summary>The most string, Math and Convert calls one expression may make (indexers and <c>ToString()</c> are not counted).</summary>
     internal const int MaxCalls = 32;
 
+    /// <summary>Criteria up to this length and <see cref="ShallowNesting"/> are parsed on the caller's thread (measured on a 256 KB stack, see the tests).</summary>
+    internal const int ShallowCharacters = 200;
+
+    /// <summary>The deepest nesting parsed on the caller's thread.</summary>
+    internal const int ShallowNesting = 16;
+
+    private const int MaxCachedPredicates = 256;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<Hash, bool>> Cache = new(StringComparer.Ordinal);
+
     private const int ParseStackBytes = 16 * 1024 * 1024; // reserved, committed as used; the parse and the walk recurse once per nesting level
 
     private static readonly ParsingConfig Config = new()
@@ -68,13 +78,58 @@ internal static class FilterCriteriaGuard
     public static Func<Hash, bool> Compile(string criteria)
     {
         ArgumentNullException.ThrowIfNull(criteria);
+        if (Cache.TryGetValue(criteria, out var cached))
+        {
+            return cached; // only guard-approved predicates are ever stored, and a predicate holds no per-render state
+        }
+
         if (criteria.Length > MaxCriteriaCharacters)
         {
             throw new ArgumentException($"A Filter expression may not be longer than {MaxCriteriaCharacters} characters.");
         }
 
-        CheckNesting(criteria);
+        var nesting = CheckNesting(criteria);
+        var predicate = criteria.Length <= ShallowCharacters && nesting <= ShallowNesting && RuntimeHelpers.TryEnsureSufficientExecutionStack()
+            ? ParseOnThisThread(criteria)
+            : ParseOnLargeStack(criteria);
 
+        if (Cache.Count >= MaxCachedPredicates)
+        {
+            Cache.Clear(); // clear on full: the cache is a bound, not a policy
+        }
+
+        Cache[criteria] = predicate;
+        return predicate;
+    }
+
+    /// <summary>Drops every cached predicate (tests).</summary>
+    internal static void ClearCache() => Cache.Clear();
+
+    /// <summary>The number of cached predicates (tests).</summary>
+    internal static int CachedCount => Cache.Count;
+
+    private static Func<Hash, bool> ParseAndCheck(string criteria)
+    {
+        var lambda = DynamicExpressionParser.ParseLambda(Config, typeof(Hash), typeof(bool), criteria);
+        var body = new Checker().Visit(lambda.Body)!;
+        return Expression.Lambda<Func<Hash, bool>>(body, lambda.Parameters).Compile();
+    }
+
+    /// <summary>Short, shallow criteria need little stack, so they are parsed on the caller's thread (a thread per call costs ten times the parse).</summary>
+    private static Func<Hash, bool> ParseOnThisThread(string criteria)
+    {
+        try
+        {
+            return ParseAndCheck(criteria);
+        }
+        catch (InsufficientExecutionStackException)
+        {
+            throw new ArgumentException("A Filter expression is too complex for the stack of this thread.");
+        }
+    }
+
+    private static Func<Hash, bool> ParseOnLargeStack(string criteria)
+    {
         Func<Hash, bool>? predicate = null;
         Exception? failure = null;
         var thread = new Thread(
@@ -82,10 +137,7 @@ internal static class FilterCriteriaGuard
             {
                 try
                 {
-                    var lambda = DynamicExpressionParser.ParseLambda(Config, typeof(Hash), typeof(bool), criteria);
-                    var checker = new Checker();
-                    var body = checker.Visit(lambda.Body)!;
-                    predicate = Expression.Lambda<Func<Hash, bool>>(body, lambda.Parameters).Compile();
+                    predicate = ParseAndCheck(criteria);
                 }
                 catch (Exception ex)
                 {
@@ -108,8 +160,9 @@ internal static class FilterCriteriaGuard
     internal static Expression CheckTree(Expression body) => new Checker().Visit(body)!;
 
     /// <summary>Refuses deep nesting of parentheses, unary signs and <c>not</c> before the recursive parser sees the text (string literals are skipped).</summary>
-    private static void CheckNesting(string criteria)
+    private static int CheckNesting(string criteria)
     {
+        var deepest = 0;
         var parentheses = 0;
         var run = 0; // consecutive unary operators ("- - -", "not not not")
         var i = 0;
@@ -158,6 +211,7 @@ internal static class FilterCriteriaGuard
                 run = 0;
             }
 
+            deepest = Math.Max(deepest, parentheses + run);
             if (parentheses + run > MaxNesting)
             {
                 throw new ArgumentException($"A Filter expression may not nest parentheses, signs or 'not' deeper than {MaxNesting} levels.");
@@ -165,6 +219,8 @@ internal static class FilterCriteriaGuard
 
             i++;
         }
+
+        return deepest;
     }
 
     private static bool IsNumeric(Type type) => Type.GetTypeCode(Nullable.GetUnderlyingType(type) ?? type) is
@@ -182,6 +238,7 @@ internal static class FilterCriteriaGuard
 
     private sealed class Checker : ExpressionVisitor
     {
+        private readonly HashSet<Expression> _generated = new(ReferenceEqualityComparer.Instance); // nodes the ordinal rewrite built: not counted again
         private int _calls;
 
         public override Expression? Visit(Expression? node)
@@ -226,7 +283,7 @@ internal static class FilterCriteriaGuard
                 throw new ArgumentException($"A Filter expression may not call {method.Name}.");
             }
 
-            if (method.Name is not ("get_Item" or "get_Chars" or "ToString") && ++_calls > MaxCalls)
+            if (method.Name is not ("get_Item" or "get_Chars" or "ToString") && !_generated.Contains(node) && ++_calls > MaxCalls)
             {
                 throw new ArgumentException($"A Filter expression may not make more than {MaxCalls} method calls.");
             }
@@ -263,6 +320,7 @@ internal static class FilterCriteriaGuard
                 var rewritten = Ordinal(node);
                 if (rewritten != null)
                 {
+                    _generated.Add(rewritten);
                     return base.Visit(rewritten) ?? rewritten;
                 }
             }
