@@ -72,13 +72,15 @@ public sealed class TemplateNestingScanTests
         Assert.Equal(1, TemplateNesting.Depth("{%-if a-%}{%-endif-%}"));
     }
 
-    [Fact]
-    public void TheParseBackstop_SurvivesATemplateTheScanDoesNotLimit()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheParseBackstop_SurvivesATemplateTheScanDoesNotLimit(bool sharedTokens)
     {
         // thousands of nested blocks overflow a 256 KB caller stack (20 000 overflow the main thread's 8 MB); the parse runs on its own large stack, whoever calls it
         var template = string.Concat(Enumerable.Repeat("{% if a %}", 5_000)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 5_000));
         Template? parsed = null;
-        var thread = new Thread(() => parsed = TemplateNesting.Parse(template, int.MaxValue), maxStackSize: 256 * 1024);
+        var thread = new Thread(() => parsed = TemplateNesting.Parse(template, int.MaxValue, sharedTokens), maxStackSize: 256 * 1024);
         thread.Start();
         thread.Join();
 
@@ -156,10 +158,13 @@ public sealed class TemplateNestingScanTests
     };
 
     [Theory]
-    [InlineData(SyntaxCompatibility.DotLiquid20)]
-    [InlineData(SyntaxCompatibility.DotLiquid21)]
-    [InlineData(SyntaxCompatibility.DotLiquid22)]
-    public void TheSharedTokenParse_PreprocessesLikeTemplateParse_ForEveryShorthand_AtEverySyntaxLevel(SyntaxCompatibility level)
+    [InlineData(SyntaxCompatibility.DotLiquid20, true)]
+    [InlineData(SyntaxCompatibility.DotLiquid21, true)]
+    [InlineData(SyntaxCompatibility.DotLiquid22, true)]
+    [InlineData(SyntaxCompatibility.DotLiquid20, false)]
+    [InlineData(SyntaxCompatibility.DotLiquid21, false)]
+    [InlineData(SyntaxCompatibility.DotLiquid22, false)]
+    public void TheSharedTokenParse_PreprocessesLikeTemplateParse_ForEveryShorthand_AtEverySyntaxLevel(SyntaxCompatibility level, bool sharedTokens)
     {
         var original = Template.DefaultSyntaxCompatibilityLevel;
         var data = global::DotLiquid.Hash.FromAnonymousObject(new { a = true, x = new[] { 1, 2 } });
@@ -175,12 +180,12 @@ public sealed class TemplateNestingScanTests
                 }
                 catch (SyntaxException expected)
                 {
-                    var actual = Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(source, int.MaxValue));
+                    var actual = Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(source, int.MaxValue, sharedTokens));
                     Assert.Equal(expected.Message, actual.Message);
                     continue;
                 }
 
-                var shared = TemplateNesting.Parse(source, int.MaxValue);
+                var shared = TemplateNesting.Parse(source, int.MaxValue, sharedTokens);
 
                 Assert.Equal(ParsedDepth(stock.Root!), ParsedDepth(shared.Root!));
                 Assert.Equal(stock.Render(data), shared.Render(data));
@@ -227,8 +232,10 @@ public sealed class TemplateNestingScanTests
         Assert.Equal(0, fieldStores);
     }
 
-    [Fact]
-    public void TheSharedTokenParse_SeesTheCallersCulture()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheSharedTokenParse_SeesTheCallersCulture(bool sharedTokens)
     {
         var original = System.Globalization.CultureInfo.CurrentCulture;
         try
@@ -238,7 +245,7 @@ public sealed class TemplateNestingScanTests
                 System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(name);
                 const string source = "{{ 1.5 | Plus: 2.25 }}{{ 'I' | Downcase }}{% assign n = 3.5 %}{{ n | Times: 2 }}";
 
-                Assert.Equal(Template.Parse(source).Render(), TemplateNesting.Parse(source, int.MaxValue).Render());
+                Assert.Equal(Template.Parse(source).Render(), TemplateNesting.Parse(source, int.MaxValue, sharedTokens).Render());
             }
         }
         finally
@@ -247,8 +254,10 @@ public sealed class TemplateNestingScanTests
         }
     }
 
-    [Fact]
-    public void TheSharedTokenParse_BuildsTheSameTreeAsTemplateParse()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheSharedTokenParse_BuildsTheSameTreeAsTemplateParse(bool sharedTokens)
     {
         var random = new Random(4242);
         var data = global::DotLiquid.Hash.FromAnonymousObject(new { a = true, x = new[] { 1, 2, 3 } });
@@ -263,11 +272,11 @@ public sealed class TemplateNestingScanTests
             }
             catch (SyntaxException)
             {
-                Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(source, int.MaxValue)); // refused the same way
+                Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(source, int.MaxValue, sharedTokens)); // refused the same way
                 continue;
             }
 
-            var shared = TemplateNesting.Parse(source, int.MaxValue);
+            var shared = TemplateNesting.Parse(source, int.MaxValue, sharedTokens);
             compared++;
             Assert.Equal(ParsedDepth(stock.Root!), ParsedDepth(shared.Root!));
             Assert.Equal(stock.Render(data), shared.Render(data));
@@ -401,5 +410,28 @@ public sealed class TemplateNestingScanTests
         Assert.False(TemplateNesting.SharedTokenParseSupported(new Version(2, 3, 261, 0)));
         Assert.False(TemplateNesting.SharedTokenParseSupported(new Version(2, 2, 692, 0)));
         Assert.False(TemplateNesting.SharedTokenParseSupported(null));
+    }
+
+    [Fact]
+    public void ThePublicParse_AsksTheGate_AndTakesTheSharedPathOnTheLoadedDotLiquid()
+    {
+        // fails if the public overload stops asking the gate (a hard-coded false would take the stock path on the supported 2.3.260)
+        TemplateNesting.LastParseWasShared = false;
+
+        TemplateNesting.Parse("{% if a %}x{% endif %}", 10);
+
+        Assert.True(TemplateNesting.LastParseWasShared);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheSeam_RefusesDeepNesting_OnBothPaths(bool sharedTokens)
+    {
+        var deep = string.Concat(Enumerable.Repeat("{% if a %}", 11)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 11));
+        var ok = string.Concat(Enumerable.Repeat("{% if a %}", 10)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 10));
+
+        Assert.Throws<SyntaxException>(() => TemplateNesting.Parse(deep, 10, sharedTokens));
+        Assert.NotNull(TemplateNesting.Parse(ok, 10, sharedTokens));
     }
 }
