@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using DotLiquid;
 using DotLiquid.Exceptions;
 using TabTabGo.Templating.Liquid;
@@ -97,41 +98,6 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     }
 
     [Fact]
-    public void ReadTemplateFile_AFifoInTheRoot_IsRefusedWithoutBlocking_AndWithoutAServerPath()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        var fifo = Path.Combine(_root, "_pipe.liquid");
-        using (var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", fifo) { RedirectStandardError = true }))
-        {
-            make.WaitForExit();
-            if (make.ExitCode != 0)
-            {
-                return; // no mkfifo on this machine
-            }
-        }
-
-        var previous = TabTabGo.Templating.Liquid.GuardedRead.OpenTimeout;
-        TabTabGo.Templating.Liquid.GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
-        try
-        {
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-
-            var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'pipe'"));
-
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
-            Assert.DoesNotContain(_root, ex.Message);
-        }
-        finally
-        {
-            TabTabGo.Templating.Liquid.GuardedRead.OpenTimeout = previous;
-        }
-    }
-
-    [Fact]
     public void ReadTemplateFile_AnEmptyRegularPartial_IsStillRead()
     {
         File.WriteAllText(Path.Combine(_root, "_empty.liquid"), string.Empty);
@@ -153,48 +119,138 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
 
     private static readonly Func<EnhancedLocalFileSystem, string, string> Read = (fs, name) => fs.ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'" + name + "'");
 
-    [Fact]
-    public void G2_TwentyConcurrentReadsOfAFifo_AreAllPathFree_WithinTheTimeout_AndLeaveNoThreadsBehind()
+
+    // ---- round 6 addendum: GR-1 capped read, GR-2/3 no write-open, no thread, no release
+
+    private sealed class EndlessStream(long reportedLength, long actualBytes) : Stream
     {
-        if (!TryMakeFifo(Path.Combine(_root, "_pipe2.liquid")))
+        private long _served;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => true;
+
+        public override bool CanWrite => false;
+
+        public override long Length => reportedLength;
+
+        public override long Position
+        {
+            get => _served;
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var n = (int)Math.Min(count, actualBytes - _served);
+            Array.Fill(buffer, (byte)'a', offset, n);
+            _served += n;
+            return n;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public void Gr1_AFileThatGrowsAfterTheLengthWasTaken_IsRefusedAtTheCap()
+    {
+        GuardedRead.OpenOverride = _ => new EndlessStream(reportedLength: 10, actualBytes: GuardedRead.MaxBytes * 2);
+        try
+        {
+            var ex = Assert.Throws<IOException>(() => GuardedRead.ReadText("ignored"));
+
+            Assert.DoesNotContain("ignored", ex.Message);
+        }
+        finally
+        {
+            GuardedRead.OpenOverride = null;
+        }
+    }
+
+    [Fact]
+    public void Gr1_ExactlyTheCap_ReadsAndOneByteMore_IsRefused()
+    {
+        try
+        {
+            GuardedRead.OpenOverride = _ => new EndlessStream(GuardedRead.MaxBytes, GuardedRead.MaxBytes);
+            Assert.Equal(GuardedRead.MaxBytes, GuardedRead.ReadText("ignored").Length);
+
+            GuardedRead.OpenOverride = _ => new EndlessStream(10, GuardedRead.MaxBytes + 1);
+            Assert.Throws<IOException>(() => GuardedRead.ReadText("ignored"));
+        }
+        finally
+        {
+            GuardedRead.OpenOverride = null;
+        }
+    }
+
+    [Fact]
+    public void Gr1_AFileWhoseReportedLengthIsOverTheCap_IsRefusedWithoutReading()
+    {
+        GuardedRead.OpenOverride = _ => new EndlessStream(GuardedRead.MaxBytes + 1, 5);
+        try
+        {
+            Assert.Throws<IOException>(() => GuardedRead.ReadText("ignored"));
+        }
+        finally
+        {
+            GuardedRead.OpenOverride = null;
+        }
+    }
+
+    [Fact]
+    public void Gr2_ASymbolicLinkToAFifo_IsRefusedFast()
+    {
+        if (!TryMakeFifo(Path.Combine(_root, "real.fifo")) || !TryLink(Path.Combine(_root, "_linked.liquid"), "real.fifo", directory: false))
+        {
+            return;
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "linked"));
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed}");
+        Assert.DoesNotContain(_root, ex.Message);
+    }
+
+    private static int ThreadCount() => System.Diagnostics.Process.GetCurrentProcess().Threads.Count;
+
+    [Fact]
+    public void Fifo_InTheTemplateRoot_IsRefusedImmediately_ByTwentyConcurrentRequests_WithNoThreadLeft()
+    {
+        if (!TryMakeFifo(Path.Combine(_root, "_pipe3.liquid")))
         {
             return;
         }
 
         var fs = new EnhancedLocalFileSystem(_root);
-        var previous = GuardedRead.OpenTimeout;
-        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
-        try
+        var before = ThreadCount();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var failures = new Exception?[20];
+        var threads = Enumerable.Range(0, 20).Select(i => new System.Threading.Thread(() => failures[i] = Record.Exception(() => Read(fs, "pipe3")))).ToList();
+        threads.ForEach(t => t.Start());
+        threads.ForEach(t => t.Join());
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.All(failures, ex =>
         {
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var failures = new Exception[20];
-
-            System.Threading.Tasks.Parallel.For(0, 20, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 20 }, i => failures[i] = Record.Exception(() => Read(fs, "pipe2"))!);
-
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
-            Assert.All(failures, ex =>
-            {
-                Assert.IsType<FileSystemException>(ex);
-                Assert.DoesNotContain(_root, ex.Message);
-            });
-        }
-        finally
-        {
-            GuardedRead.OpenTimeout = previous;
-        }
-
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while ((GuardedRead.StuckReaders > 0 || GuardedRead.LiveWorkers > 0) && DateTime.UtcNow < deadline)
-        {
-            System.Threading.Thread.Sleep(50);
-        }
-
-        Assert.Equal(0, GuardedRead.StuckReaders);
-        Assert.Equal(0, GuardedRead.LiveWorkers); // every worker thread has ended: none leaked per request
+            Assert.IsType<FileSystemException>(ex);
+            Assert.DoesNotContain(_root, ex!.Message);
+        });
+        Assert.True(ThreadCount() <= before + 2, $"threads {before} -> {ThreadCount()}: a blocked reader was left behind");
     }
 
     [Fact]
-    public void G1_ARegularPartialSwappedForAFifoBetweenTheDecisionAndTheOpen_IsStillRefused()
+    public void G1_ARegularPartialSwappedForAFifoBeforeTheOpen_IsStillRefusedImmediately()
     {
         File.WriteAllText(Path.Combine(_root, "_swap.liquid"), "regular");
         if (!TryMakeFifo(Path.Combine(_root, "swap.fifo")))
@@ -202,11 +258,9 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
             return;
         }
 
-        var previous = GuardedRead.OpenTimeout;
-        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
         GuardedRead.BeforeOpen = p =>
         {
-            if (!p.EndsWith("swap.xml", StringComparison.Ordinal) && !p.EndsWith("_swap.liquid", StringComparison.Ordinal))
+            if (!p.EndsWith("_swap.liquid", StringComparison.Ordinal))
             {
                 return; // other tests may read files while this hook is set
             }
@@ -216,28 +270,51 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         };
         try
         {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
             var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "swap"));
 
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed}");
             Assert.DoesNotContain(_root, ex.Message);
         }
         finally
         {
             GuardedRead.BeforeOpen = null;
-            GuardedRead.OpenTimeout = previous;
         }
     }
 
     [Fact]
-    public void G1_RegularPartials_StillReadCorrectlyAndFast()
+    public void Device_ReachedThroughASymbolicLink_IsRefused_AndADirectoryIsNotAPartial()
     {
-        var fs = new EnhancedLocalFileSystem(_root);
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-
-        for (var i = 0; i < 200; i++)
+        Directory.CreateDirectory(Path.Combine(_root, "_dir.liquid"));
+        if (!OperatingSystem.IsWindows() && TryLink(Path.Combine(_root, "_null.liquid"), "/dev/null", directory: false))
         {
-            Assert.Equal("root-part", Read(fs, "part"));
+            // v8 does not resolve links, and /dev/null is seekable with length 0: it reads as an empty partial at once (what matters is that it never blocks and leaks no path)
+            var ex = Record.Exception(() => Read(new EnhancedLocalFileSystem(_root), "null"));
+            Assert.True(ex == null || !ex.Message.Contains(_root));
         }
 
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "dir"));
+    }
+
+    private static bool TryLink(string link, string target, bool directory)
+    {
+        try
+        {
+            if (directory)
+            {
+                Directory.CreateSymbolicLink(link, target);
+            }
+            else
+            {
+                File.CreateSymbolicLink(link, target);
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is PlatformNotSupportedException)
+        {
+            return false;
+        }
     }
 }

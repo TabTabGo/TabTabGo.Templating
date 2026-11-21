@@ -269,7 +269,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             try
             {
                 // a symbolic link inside the root may point outside it: compare the real paths
-                if (!RealPathIsInside(root, full))
+                var real = RealPathInside(root, full);
+                if (real == null)
                 {
                     throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
                 }
@@ -281,7 +282,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     MaxCharactersInDocument = _options.MaxXmlCharacters,
                 };
 
-                return GuardedRead.Read(full, stream =>
+                return GuardedRead.Read(real, stream => // the resolved path is what is opened
                 {
                     using (var reader = System.Xml.XmlReader.Create(stream, settings))
                     {
@@ -505,11 +506,13 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             return builder.ToString();
         }
 
-        private static bool RealPathIsInside(string root, string path)
+        /// <summary>The real path of <paramref name="path"/> when it lies inside <paramref name="root"/>, otherwise null; callers open this resolved path.</summary>
+        private static string RealPathInside(string root, string path)
         {
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var realRoot = ResolveLinks(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + Path.DirectorySeparatorChar;
-            return ResolveLinks(path).StartsWith(realRoot, comparison);
+            var real = ResolveLinks(path);
+            return real.StartsWith(realRoot, comparison) ? real : null;
         }
 
         /// <summary>

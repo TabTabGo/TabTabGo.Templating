@@ -1,125 +1,55 @@
 using System;
 using System.IO;
-using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
+using Microsoft.Win32.SafeHandles;
 
 namespace TabTabGo.Templating.OpenXml.SpreadSheet
 {
     /// <summary>
-    /// Opens and reads a file from a folder the host trusts but other accounts may be able to write to. A named pipe or device placed there makes <c>File.Exists</c> true and the
-    /// open (or the read) block forever. The open is the blocking step, so it runs on a short-lived background thread with a time-out; the handle it returns is then checked
-    /// (a regular file is seekable, a pipe or a terminal is not) and read from the SAME handle, bounded by <see cref="MaxBytes"/>: there is no separate check that a swapped file could outrun.
-    /// On a time-out the blocked open is released (Unix: by opening the pipe's write end, which pairs with the waiting reader), and a reader that cannot be released is counted;
-    /// new reads are refused while <see cref="MaxStuckReaders"/> are still stuck, so a stream of such files cannot exhaust threads. Every failure is an <see cref="IOException"/> without a path.
+    /// Opens and reads a file from a folder the host trusts but other accounts may be able to write to. A named pipe or device placed there makes <c>File.Exists</c> true, and a plain
+    /// open of it blocks forever. .NET cannot tell a regular file from a pipe without opening it, and cannot open without blocking, so on Linux and macOS the file is opened ONCE, read-only,
+    /// with <c>O_NONBLOCK</c> through one small native call (<c>open(path, flags)</c>, no variadic arguments; this is the only P/Invoke in the library). That open returns at once for a pipe,
+    /// a terminal or a device; the handle is then verified (a regular file is seekable and not larger than <see cref="MaxBytes"/>) and read from the SAME handle, so there is no separate
+    /// type check that a swapped file could outrun, no write-open, no helper thread and no counter. The read itself is capped at <see cref="MaxBytes"/> by counting the bytes that arrive.
+    /// Windows opens the file normally (a device handle is not seekable and is refused). <b>Known limitation:</b> on another Unix, or where libc cannot be loaded, a plain open is used and a pipe
+    /// placed in the template or stylesheet folder would block the render; the folder must not be writable by untrusted parties there. Every refusal is an <see cref="IOException"/> without a path.
     /// </summary>
     internal static class GuardedRead
     {
         /// <summary>The largest file read (templates and stylesheets are small; anything bigger is refused).</summary>
         internal const long MaxBytes = 16 * 1024 * 1024;
 
-        /// <summary>The most blocked opens tolerated at once; further reads are refused until some are released.</summary>
-        internal const int MaxStuckReaders = 4;
+        private const int ErrorNoEntry = 2;
+        private const int ErrorAccess = 13;
 
-        private static int _stuck;
-        private static int _live;
+        private static int _nativeUnavailable;
 
-        /// <summary>How long the open may take before the file is treated as not usable (tests lower it).</summary>
-        internal static TimeSpan OpenTimeout { get; set; } = TimeSpan.FromSeconds(5);
-
-        /// <summary>Runs between the decision to read and the open, on the worker thread (tests swap a file for a pipe here).</summary>
+        /// <summary>Runs just before the open (tests swap a regular file for a pipe here).</summary>
         internal static Action<string> BeforeOpen { get; set; }
 
-        /// <summary>Blocked opens that were abandoned and have not finished yet.</summary>
-        internal static int StuckReaders => Volatile.Read(ref _stuck);
+        /// <summary>Replaces the open (tests hand back a stream that lies about its length).</summary>
+        internal static Func<string, Stream> OpenOverride { get; set; }
 
-        /// <summary>Worker threads that are still running (a blocked open keeps its thread until it is released).</summary>
-        internal static int LiveWorkers => Volatile.Read(ref _live);
-
-        /// <summary>Opens <paramref name="path"/> once, refuses anything that is not a seekable regular file of at most <see cref="MaxBytes"/>, and hands the same stream to <paramref name="consume"/>.</summary>
+        /// <summary>Opens <paramref name="path"/> once, refuses anything that is not a seekable regular file, and hands a capped view of the same stream to <paramref name="consume"/>.</summary>
         public static T Read<T>(string path, Func<Stream, T> consume)
         {
-            if (StuckReaders >= MaxStuckReaders)
+            var hook = BeforeOpen;
+            if (hook != null)
             {
-                throw new IOException("Too many files are blocking; the file was not read.");
+                hook(path);
             }
 
-            var state = new OpenState();
-            var thread = new Thread(() =>
-            {
-                Interlocked.Increment(ref _live);
-                try
-                {
-                    var hook = BeforeOpen;
-                    if (hook != null)
-                    {
-                        hook(path);
-                    }
-
-                    var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
-                    lock (state)
-                    {
-                        if (state.Abandoned)
-                        {
-                            stream.Dispose();
-                        }
-                        else
-                        {
-                            state.Stream = stream;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    state.Failure = ex;
-                }
-                finally
-                {
-                    lock (state)
-                    {
-                        state.Done = true;
-                        if (state.Abandoned)
-                        {
-                            Interlocked.Decrement(ref _stuck);
-                        }
-                    }
-
-                    Interlocked.Decrement(ref _live);
-                }
-            })
-            {
-                IsBackground = true,
-            };
-            thread.Start();
-
-            if (!thread.Join(OpenTimeout))
-            {
-                lock (state)
-                {
-                    if (!state.Done)
-                    {
-                        state.Abandoned = true;
-                        Interlocked.Increment(ref _stuck);
-                    }
-                }
-
-                ReleaseBlockedOpen(path);
-                throw new IOException("The file could not be opened in time.");
-            }
-
-            if (state.Failure != null)
-            {
-                ExceptionDispatchInfo.Capture(state.Failure).Throw();
-            }
-
-            using (var opened = state.Stream)
+            var over = OpenOverride;
+            using (var opened = over != null ? over(path) : Open(path))
             {
                 if (!opened.CanSeek || opened.Length > MaxBytes)
                 {
                     throw new IOException("The file is not a regular file of usable size.");
                 }
 
-                return consume(opened);
+                return consume(new CappedStream(opened, MaxBytes));
             }
         }
 
@@ -135,40 +65,136 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             });
         }
 
-        /// <summary>Releases an open that is blocked on a named pipe by opening its write end (Unix); best effort, nothing happens on other platforms or for other files.</summary>
-        private static void ReleaseBlockedOpen(string path)
+        private static Stream Open(string path)
         {
-            if (OperatingSystem.IsWindows())
+            if (!OperatingSystem.IsWindows() && Volatile.Read(ref _nativeUnavailable) == 0)
             {
-                return;
+                var stream = TryOpenNonBlocking(path);
+                if (stream != null)
+                {
+                    return stream;
+                }
             }
 
-            var releaser = new Thread(() =>
-            {
-                try
-                {
-                    using (new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete, 1))
-                    {
-                    }
-                }
-                catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
-                {
-                    // not a pipe, or not writable: nothing to release
-                }
-            })
-            {
-                IsBackground = true,
-            };
-            releaser.Start();
-            releaser.Join(TimeSpan.FromSeconds(1));
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
         }
 
-        private sealed class OpenState
+        private static FileStream TryOpenNonBlocking(string path)
         {
-            public FileStream Stream;
-            public Exception Failure;
-            public bool Done;
-            public bool Abandoned;
+            int flags;
+            if (OperatingSystem.IsMacOS())
+            {
+                flags = 0x0004 | 0x1000000; // O_RDONLY | O_NONBLOCK | O_CLOEXEC
+            }
+            else if (OperatingSystem.IsLinux())
+            {
+                flags = 0x0800 | 0x80000; // O_RDONLY | O_NONBLOCK | O_CLOEXEC (x86, x64, arm, arm64)
+            }
+            else
+            {
+                return null;
+            }
+
+            int fd;
+            int error;
+            try
+            {
+                fd = OperatingSystem.IsMacOS() ? Native.MacOpen(path, flags) : Native.LinuxOpen(path, flags);
+                error = Marshal.GetLastPInvokeError();
+            }
+            catch (Exception ex) when (ex is DllNotFoundException || ex is EntryPointNotFoundException)
+            {
+                Volatile.Write(ref _nativeUnavailable, 1);
+                return null;
+            }
+
+            if (fd < 0)
+            {
+                if (error == ErrorNoEntry)
+                {
+                    throw new FileNotFoundException("The file was not found.");
+                }
+
+                if (error == ErrorAccess)
+                {
+                    throw new UnauthorizedAccessException("The file cannot be read.");
+                }
+
+                throw new IOException("The file cannot be opened.");
+            }
+
+            var handle = new SafeFileHandle((IntPtr)fd, true);
+            try
+            {
+                return new FileStream(handle, FileAccess.Read, 1, false);
+            }
+            catch
+            {
+                handle.Dispose();
+                throw new IOException("The file is not a regular file.");
+            }
+        }
+
+        private static class Native
+        {
+            [DllImport("libSystem", EntryPoint = "open", SetLastError = true, CharSet = CharSet.Ansi)]
+            internal static extern int MacOpen(string path, int flags);
+
+            [DllImport("libc.so.6", EntryPoint = "open", SetLastError = true, CharSet = CharSet.Ansi)]
+            internal static extern int LinuxOpen(string path, int flags);
+        }
+
+        /// <summary>A read-only view that throws once more than <c>limit</c> bytes have been read, whatever length the file reported when it was opened.</summary>
+        private sealed class CappedStream : Stream
+        {
+            private readonly Stream _inner;
+            private readonly long _limit;
+            private long _total;
+
+            public CappedStream(Stream inner, long limit)
+            {
+                _inner = inner;
+                _limit = limit;
+            }
+
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => false;
+
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count) => Count(_inner.Read(buffer, offset, count));
+
+            public override int Read(Span<byte> buffer) => Count(_inner.Read(buffer));
+
+            private int Count(int read)
+            {
+                _total += read;
+                if (_total > _limit)
+                {
+                    throw new IOException("The file is larger than the allowed size.");
+                }
+
+                return read;
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
     }
 }
