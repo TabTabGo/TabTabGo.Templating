@@ -176,9 +176,18 @@ internal static class FilterCriteriaGuard
 
     private static Func<Hash, bool> ParseAndCheck(string criteria)
     {
-        var lambda = DynamicExpressionParser.ParseLambda(Config, typeof(Hash), typeof(bool), criteria);
-        var body = new Checker().Visit(lambda.Body)!;
-        return Expression.Lambda<Func<Hash, bool>>(body, lambda.Parameters).Compile();
+        try
+        {
+            var lambda = DynamicExpressionParser.ParseLambda(Config, typeof(Hash), typeof(bool), criteria);
+            var body = new Checker().Visit(lambda.Body)!;
+            return Expression.Lambda<Func<Hash, bool>>(body, lambda.Parameters).Compile();
+        }
+        catch (Exception ex) when (ex is not ArgumentException and not InsufficientExecutionStackException)
+        {
+            // an expression that parses but does not type-check ("renew == 1": Equal is not defined for Object and Int32) or compile surfaces as one catchable, short, path-free error
+            var message = ex.Message.ReplaceLineEndings(" ");
+            throw new ArgumentException("A Filter expression is not valid: " + (message.Length > 200 ? message[..200] : message));
+        }
     }
 
     /// <summary>Short, shallow criteria need little stack, so they are parsed on the caller's thread (a thread per call costs ten times the parse).</summary>

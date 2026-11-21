@@ -20,6 +20,8 @@ public class JsonSpreedSheet
     internal const int MaxSheets = 255;
 
     private const double MaxDateSerial = 2958465; // 9999-12-31
+
+    private const double FirstSafeDateSerial = 61; // 1900-03-01: the first date whose OLE serial equals the Excel serial
     private static readonly char[] InvalidSheetNameChars = { '[', ']', ':', '*', '?', '/', '\\' };
     private static readonly string[] ErrorLiterals = { "#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!" };
 
@@ -64,15 +66,16 @@ public class JsonSpreedSheet
 
         // validate the sheet list before the package is created; failures later on (stylesheet, cell values) can still leave a partial stream, which is why the
         // file overload builds in memory and writes the file only on success
-        var jSheets = json.SelectToken("$.Workbook.Sheets")?.Children().ToList() ?? new List<JToken>();
+        var sheetsToken = json.SelectToken("$.Workbook.Sheets");
+        if (sheetsToken is JContainer { Count: > MaxSheets })
+        {
+            throw new ArgumentException($"The workbook may define at most {MaxSheets} sheets.", nameof(json)); // counted before any copy of the list
+        }
+
+        var jSheets = sheetsToken?.Children().ToList() ?? new List<JToken>();
         if (jSheets.Count == 0)
         {
             throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", nameof(json));
-        }
-
-        if (jSheets.Count > MaxSheets)
-        {
-            throw new ArgumentException($"The workbook may define at most {MaxSheets} sheets.", nameof(json));
         }
 
         var sheetIds = ResolveSheetIds(jSheets);
@@ -443,12 +446,12 @@ public class JsonSpreedSheet
 
         if (value is JValue { Value: DateTime dateTime })
         {
-            return dateTime.ToOADate().ToString("R", CultureInfo.InvariantCulture);
+            return DateToSerial(dateTime);
         }
 
         if (value is JValue { Value: DateTimeOffset dateTimeOffset })
         {
-            return dateTimeOffset.UtcDateTime.ToOADate().ToString("R", CultureInfo.InvariantCulture);
+            return DateToSerial(dateTimeOffset.UtcDateTime);
         }
 
         var text = value.ToString();
@@ -462,8 +465,23 @@ public class JsonSpreedSheet
         }
 
         return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
-            ? parsed.ToOADate().ToString("R", CultureInfo.InvariantCulture)
+            ? DateToSerial(parsed)
             : throw new ArgumentException($"A Date cell must hold a date, or an Excel serial number ({text}).", "json");
+    }
+
+    /// <summary>
+    /// The Excel serial of a date. Excel counts a 29 February 1900 that never existed, so <c>ToOADate</c> is one off before 1900-03-01; rather than guess, dates before 1900-03-01 are refused
+    /// (a number from 1 to 60 is still accepted as an explicit serial). The latest date is 9999-12-31 (serial 2958465).
+    /// </summary>
+    private static string DateToSerial(DateTime date)
+    {
+        var serial = date.ToOADate();
+        if (serial < FirstSafeDateSerial || Math.Floor(serial) > MaxDateSerial)
+        {
+            throw new ArgumentException($"A Date cell must hold a date from 1900-03-01 to 9999-12-31 ({date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}).", "json");
+        }
+
+        return serial.ToString("R", CultureInfo.InvariantCulture);
     }
 
     private static string Invariant(JToken value) => value is JValue { Value: IFormattable formattable }
@@ -501,20 +519,37 @@ public class JsonSpreedSheet
             throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
         }
 
-        // a symbolic link inside the root may point outside it: compare the real paths
-        if (!RealPath.IsInside(root, full))
+        try
         {
-            throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
-        }
+            // a symbolic link inside the root may point outside it: compare the real paths
+            if (!RealPath.IsInside(root, full))
+            {
+                throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
+            }
 
-        var settings = new System.Xml.XmlReaderSettings
+            var settings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = _options.MaxXmlCharacters,
+            };
+
+            return GuardedRead.Run(full, () =>
+            {
+                using var reader = System.Xml.XmlReader.Create(full, settings);
+                return XDocument.Load(reader);
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or TimeoutException)
         {
-            DtdProcessing = System.Xml.DtdProcessing.Prohibit,
-            XmlResolver = null,
-            MaxCharactersInDocument = _options.MaxXmlCharacters,
-        };
-        using var reader = System.Xml.XmlReader.Create(full, settings);
-        return XDocument.Load(reader);
+            // an unreadable file, a directory, a pipe: the system message carries the absolute path, ours does not (and no inner exception that could)
+            throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
+        }
+        catch (System.Xml.XmlException)
+        {
+            // the XmlException message and SourceUri can carry the file name
+            throw new ArgumentException("The stylesheet is not well-formed XML, or it uses a DTD (not allowed).", nameof(requested));
+        }
     }
 
     /// <summary>
@@ -555,12 +590,15 @@ public class JsonSpreedSheet
         var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
         if (map != null)
         {
-            if (useAlternative && map["SAlternativeIndex"] != null)
+            var mapped = useAlternative && map["SAlternativeIndex"] != null
+                ? ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0
+                : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
+            if (mapped >= Math.Max(styleCount, 1))
             {
-                return UInt32Value.FromUInt32(ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0);
+                throw new ArgumentException($"The StyleMap index {mapped} of '{format}' is outside the stylesheet's {styleCount} cell formats.", "json");
             }
 
-            return UInt32Value.FromUInt32(ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0);
+            return UInt32Value.FromUInt32(mapped);
         }
 
         return UInt32Value.FromUInt32(0);
