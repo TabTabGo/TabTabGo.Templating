@@ -393,4 +393,13 @@ public sealed class TemplateNestingScanTests
 
         Assert.True(parsedCount > 250, $"only {parsedCount} structured templates parsed");
     }
+
+    [Fact]
+    public void SharedTokenParse_IsUsedOnlyForDotLiquid2_3_260()
+    {
+        Assert.True(TemplateNesting.SharedTokenParseSupported(typeof(Template).Assembly.GetName().Version));
+        Assert.False(TemplateNesting.SharedTokenParseSupported(new Version(2, 3, 261, 0)));
+        Assert.False(TemplateNesting.SharedTokenParseSupported(new Version(2, 2, 692, 0)));
+        Assert.False(TemplateNesting.SharedTokenParseSupported(null));
+    }
 }

@@ -105,7 +105,7 @@ Behaviour changes to check before upgrading (v10.0.0 compared with 8.0.4):
 7. `Distinct` removes duplicate hashes (compared by content) and keeps scalars; `Union` with an empty second list returns the first list; `GroupBy` puts missing keys in a group named "".
 8. `TabTabGo.IO.Utilities`, `Common.Logging.Core` and `Newtonsoft.Json` (base package) are no longer dependencies; Humanizer 3 (`Humanizer.Core` + `.ar`) replaces the
    Humanizer 2 metapackage (the English and Arabic number-to-words output is unchanged for the golden matrix).
-9. **Parse limits.** `RenderString` refuses a template longer than `MaxTemplateCharacters` (1 000 000) and any template (string or file) that nests blocks deeper than
+9. **Parse limits.** `RenderString` refuses a template longer than `MaxTemplateCharacters` (262 144; it was 1 000 000 in the 10.0.0 drafts, lowered because parsing 1 000 000 characters costs 4-11 s of CPU against 0.5-1.4 s at 262 144; raise it explicitly if you need larger templates) and any template (string or file) that nests blocks deeper than
    `MaxNestingDepth` (100); DotLiquid's own parse expressions run under `ParseTimeout` (5 s). Filter regexes (`Replace`, `ReplaceFirst`, `RemoveFirst`) run under `RegexTimeout` (200 ms).
 10. `Configuration.GetTemplatingConfiguration()` and `TemplatingConfigurationSection.SectionName` are `[Obsolete]`; the method now reads an optional `appsettings.json`.
 

@@ -18,6 +18,7 @@ mode, no temp files). No public API of 8.0.4 was removed or changed.
 ### Changed (behaviour; see the release notes in the README)
 - Output, capture blocks and growing filters are capped at `MaxOutputCharacters` and throw instead of truncating; `FullPath` is relative; filters format with the render culture and parse
   invariantly; dates default to UTC; OpenXml cells are typed by JSON token, dates are serials, leading zeros stay text, tables keep row gaps and shift merged cells, filters and other tables.
+- `RenderString` refuses templates longer than `MaxTemplateCharacters`, default 262 144 (V10-17; parse cost at 1 000 000 characters is 4-11 s of CPU against 0.5-1.4 s at 262 144; raise it explicitly for larger templates).
 - `Configuration.GetTemplatingConfiguration()` and `TemplatingConfigurationSection.SectionName` are obsolete; the method reads an optional `appsettings.json`.
 - Humanizer 3 (`Humanizer.Core`, `.ar`), Microsoft.Extensions 10.0.14, Newtonsoft.Json 13.0.4, DotLiquid 2.3.260, Open XML SDK 3.5.1, System.Linq.Dynamic.Core 1.7.4.
 

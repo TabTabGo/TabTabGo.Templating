@@ -47,8 +47,8 @@ namespace TabTabGo.Templating
         /// </summary>
         public TimeSpan ParseTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
-        /// <summary>Longest template string, in characters, <c>RenderString</c> parses (template files are trusted and not limited). 0 disables the limit. Default 1 000 000.</summary>
-        public long MaxTemplateCharacters { get; set; } = 1_000_000;
+        /// <summary>Longest template string, in characters, <c>RenderString</c> parses (template files are trusted and not limited). 0 disables the limit. Default 262 144 (parse cost grows faster than the size: about 4-11 s of CPU at 1 000 000 characters against 0.5-1.4 s at 262 144); a host that needs larger templates raises it explicitly.</summary>
+        public long MaxTemplateCharacters { get; set; } = 262_144;
 
         /// <summary>
         /// Deepest nesting of block tags (<c>if</c>, <c>for</c>, custom blocks ...) a template may have. DotLiquid's parser recurses once per level, so thousands of nested
