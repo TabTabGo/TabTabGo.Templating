@@ -2,7 +2,9 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Xml.Linq;
 using Newtonsoft.Json.Linq;
 
@@ -10,6 +12,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 {
     public class JsonSpreedSheet
     {
+        private static readonly char[] InvalidSheetNameChars = { '[', ']', ':', '*', '?', '/', '\\' };
+        private static readonly string[] ErrorLiterals = { "#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!" };
+
         private readonly TemplatingOptions _options;
 
         /// <summary>Creates a writer with default <see cref="TemplatingOptions"/>.</summary>
@@ -35,6 +40,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <param name="json">The workbook definition (<c>$.Workbook</c>).</param>
         public void CreateExcelDoc(Stream stream, JObject json)
         {
+            ValidateSheets(json.SelectToken("$.Workbook.Sheets"));
+
             using SpreadsheetDocument
                 document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
             WorkbookPart workbookPart = document.AddWorkbookPart();
@@ -55,6 +62,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             {
                 stylePart.Stylesheet = GenerateStylesheet(jToken);
             }
+
+            // index 5 is a date style only when the stylesheet has that many cell formats; the generated stylesheet has none
+            uint? defaultDateStyle = stylePart.Stylesheet.CellFormats?.Elements<CellFormat>().Count() > 5 ? 5u : (uint?)null;
 
             stylePart.Stylesheet.Save();
 
@@ -102,17 +112,17 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
             // Constructing header
             var jRows = json.SelectToken("$.Workbook.Worksheet.SheetData.Rows");
-            var styleMap = json.SelectToken("$.StyleMap");
+            var styleMap = json.SelectToken("$.StyleMap") as JArray ?? new JArray(); // no StyleMap means style 0, not "write no cells"
             var iRow = -1; // to ignore header
             foreach (JToken jRow in jRows)
             {
                 var row = new Row { Collapsed = Convert.ToBoolean(jRow["Collapsed"]) };
                 var jCells = jRow.SelectToken("Cells");
 
-                if (jCells != null && styleMap != null)
+                if (jCells != null)
                     foreach (JToken jCell in jCells)
                     {
-                        row.AppendChild(this.ConstructCell(jCell, styleMap, iRow));
+                        row.AppendChild(this.ConstructCell(jCell, styleMap, iRow, defaultDateStyle));
                     }
 
                 iRow++;
@@ -133,7 +143,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// <returns>
         /// The <see cref="Cell"/>.
         /// </returns>
-        private Cell ConstructCell(JToken jCell, JToken styleMap, int rowIndex)
+        private Cell ConstructCell(JToken jCell, JArray styleMap, int rowIndex, uint? defaultDateStyle)
         {
             var dataType = ParseDataType(jCell["DataType"]?.ToString());
 
@@ -151,9 +161,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
                 cell.DataType = new EnumValue<CellValues>(CellValues.Number);
                 cell.StyleIndex = this.GetStyleIndex(jCell, styleMap, (rowIndex > 0 && (rowIndex % 2) != 0));
-                if (cell.StyleIndex.Value == 0)
+                if (cell.StyleIndex.Value == 0 && defaultDateStyle is { } dateStyle)
                 {
-                    cell.StyleIndex = UInt32Value.FromUInt32(5);
+                    cell.StyleIndex = UInt32Value.FromUInt32(dateStyle);
                 }
             }
             else
@@ -164,11 +174,25 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 //  case CellValues.InlineString:
                 //  case CellValues.String:
                 // default:
-                var text = jCell["CellValue"]!.ToString();
+                var text = ToValidXml(jCell["CellValue"]?.ToString() ?? string.Empty);
                 if (dataType == CellValues.Boolean)
                 {
                     // a boolean cell holds 1 or 0
                     text = bool.TryParse(text, out var flag) ? (flag ? "1" : "0") : text;
+                }
+
+                if (dataType == CellValues.InlineString || dataType == CellValues.SharedString)
+                {
+                    // there is no shared-string table in this mode, so a shared string is written inline; an inline string needs its <is> element
+                    cell.DataType = new EnumValue<CellValues>(CellValues.InlineString);
+                    cell.InlineString = new InlineString(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+                    cell.StyleIndex = GetStyleIndex(jCell, styleMap, (rowIndex > 0 && rowIndex % 2 != 0));
+                    return cell;
+                }
+
+                if (dataType == CellValues.Error && Array.IndexOf(ErrorLiterals, text) < 0)
+                {
+                    throw new ArgumentException("An Error cell must hold one of #N/A, #REF!, #VALUE!, #DIV/0!, #NAME?, #NUM!, #NULL!.", "json");
                 }
 
                 cell.CellValue = new CellValue(text);
@@ -210,6 +234,12 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
             }
 
+            // a symbolic link inside the root may point outside it: compare the real paths
+            if (!RealPathIsInside(root, full))
+            {
+                throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
+            }
+
             var settings = new System.Xml.XmlReaderSettings
             {
                 DtdProcessing = System.Xml.DtdProcessing.Prohibit,
@@ -240,7 +270,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
         }
 
-        private UInt32Value GetStyleIndex(JToken jCell, JToken styleMap, bool useAlternative = false)
+        private UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative = false)
         {
             if (jCell["StyleIndex"] != null)
             {
@@ -258,8 +288,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 format = "Normal";
             }
 
-            var map = styleMap.SelectToken($"[?(@.Key == '{format}')]");
-            if (map != null && map["Key"]?.ToString() == format)
+            // compare the key directly: a JSONPath filter built from data breaks on a quote or a trailing backslash in the format
+            var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
+            if (map != null)
             {
                 if (useAlternative && map["SAlternativeIndex"] != null)
                 {
@@ -270,6 +301,78 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
 
             return UInt32Value.FromUInt32(0);
+        }
+
+        private static void ValidateSheets(JToken? jSheets)
+        {
+            var sheets = jSheets?.Children().ToList() ?? new List<JToken>();
+            if (sheets.Count == 0)
+            {
+                throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", "json");
+            }
+
+            var ids = new HashSet<uint>();
+            foreach (var sheet in sheets)
+            {
+                var name = (string?)sheet["Name"];
+                if (string.IsNullOrWhiteSpace(name) || name.Length > 31 || name.IndexOfAny(InvalidSheetNameChars) >= 0)
+                {
+                    throw new ArgumentException("A sheet name must be 1 to 31 characters and may not contain any of [ ] : * ? / \\.", "json");
+                }
+
+                if ((uint?)sheet["SheetId"] is { } id && !ids.Add(id))
+                {
+                    throw new ArgumentException($"SheetId {id} is used by more than one sheet.", "json");
+                }
+            }
+        }
+
+        private static string ToValidXml(string s)
+        {
+            var builder = new System.Text.StringBuilder(s.Length);
+            for (var i = 0; i < s.Length; i++)
+            {
+                var c = s[i];
+                if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+                {
+                    builder.Append(c).Append(s[++i]);
+                }
+                else if ((c > 31 && c <= 55295) || c == 9 || c == 10 || c == 13 || (c >= 57344 && c <= 65533))
+                {
+                    builder.Append(c);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool RealPathIsInside(string root, string path)
+        {
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var realRoot = ResolveLinks(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + Path.DirectorySeparatorChar;
+            return ResolveLinks(path).StartsWith(realRoot, comparison);
+        }
+
+        private static string ResolveLinks(string absolutePath, int depth = 0)
+        {
+            if (depth > 32)
+            {
+                throw new ArgumentException("The stylesheet path contains too many links.", "requested");
+            }
+
+            var rootOfPath = Path.GetPathRoot(absolutePath) ?? string.Empty;
+            var current = rootOfPath;
+            foreach (var segment in absolutePath.Substring(rootOfPath.Length).Split(new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                current = Path.Combine(current, segment);
+                FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+                if (info.LinkTarget != null && info.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                {
+                    current = ResolveLinks(Path.GetFullPath(target.FullName), depth + 1);
+                }
+            }
+
+            return current;
         }
 
         /// <summary>

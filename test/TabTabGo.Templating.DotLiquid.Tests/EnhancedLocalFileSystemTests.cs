@@ -41,6 +41,9 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     [InlineData("has space")]
     [InlineData("a;b")]
     [InlineData("")]
+    [InlineData("part\n")]
+    [InlineData("sub/inner\n")]
+    [InlineData("part\r\n")]
     public void FullPath_IllegalName_Throws(string name)
     {
         Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).FullPath(name));

@@ -36,7 +36,7 @@ namespace TabTabGo.Templating.Liquid
 
         public string FullPath(string templatePath)
         {
-            if (templatePath == null || !Regex.IsMatch(templatePath, @"^[.\/]*[a-zA-Z0-9_\/]+$") || Path.IsPathRooted(templatePath))
+            if (templatePath == null || !Regex.IsMatch(templatePath, @"^[.\/]*[a-zA-Z0-9_\/]+\z") || Path.IsPathRooted(templatePath))
                 throw new FileSystemException("Illegal template name", templatePath);
 
             string fullPath = templatePath.Contains("/")

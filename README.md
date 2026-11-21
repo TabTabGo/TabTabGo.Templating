@@ -59,6 +59,8 @@ dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.3 -o out
 
 ## Release notes 8.0.4
 
+**The v8 line has no render limits.** There is no iteration cap, no render time-out, no output cap, no nesting cap and no template size cap (`MaxIterations`, `RenderTimeout`, `MaxOutputCharacters`, `MaxNestingDepth` and `MaxTemplateCharacters` exist only on v10 and v11, and are not backported). Do not render templates from untrusted sources with a v8 package: a template can loop, allocate or nest without bound. Use v10 or v11 for that.
+
 Callers (e-mail and report services) must now catch `RegexMatchTimeoutException` from `Render`/`RenderString`: a catastrophic regex in
 DotLiquid's built-in `Replace`/`ReplaceFirst` stops at `TemplatingOptions.RegexTimeout` (200 ms by default; 6.0.5 and 8.0.3 stopped after 10 s)
 and the exception propagates instead of producing output.

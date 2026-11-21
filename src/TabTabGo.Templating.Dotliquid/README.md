@@ -110,6 +110,8 @@ once at start-up.
 
 ## Known issues on the v8 line
 
+**The v8 line has no render limits.** There is no iteration cap, no render time-out, no output cap, no nesting cap and no template size cap (`MaxIterations`, `RenderTimeout`, `MaxOutputCharacters`, `MaxNestingDepth` and `MaxTemplateCharacters` exist only on v10 and v11, and are not backported). Do not render templates from untrusted sources with a v8 package: a template can loop, allocate or nest without bound. Use v10 or v11 for that.
+
 Fixed on v10, not on v8: filter, culture and typing bugs F-1..F-17, the per-instance hash cache (B-3: do not share one
 engine instance across threads on v8; create one per render or serialise), and `RenderString` not initialising the engine
 (B-4). The 8.0.4 release closes S-1..S-5, B-1 and B-2 and the shared-template leak. See `tabtabgo/docs/templating-modernization/spec.md` section 6.
