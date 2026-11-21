@@ -33,9 +33,9 @@ namespace TabTabGo.Templating.Liquid
 
             try
             {
-                return GuardedRead.Run(fullPath, () => File.ReadAllText(fullPath));
+                return GuardedRead.ReadText(fullPath);
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException || ex is TimeoutException)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
             {
                 // a dangling link or an unreadable file: the system message carries the absolute path, ours does not
                 throw new FileSystemException("Template not found", templatePath);

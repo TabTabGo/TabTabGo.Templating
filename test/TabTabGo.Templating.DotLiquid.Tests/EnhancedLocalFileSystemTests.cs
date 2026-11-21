@@ -114,8 +114,8 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
             }
         }
 
-        var previous = TabTabGo.Templating.Liquid.GuardedRead.SpecialFileTimeout;
-        TabTabGo.Templating.Liquid.GuardedRead.SpecialFileTimeout = TimeSpan.FromMilliseconds(300);
+        var previous = TabTabGo.Templating.Liquid.GuardedRead.OpenTimeout;
+        TabTabGo.Templating.Liquid.GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
         try
         {
             var watch = System.Diagnostics.Stopwatch.StartNew();
@@ -127,11 +127,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         }
         finally
         {
-            TabTabGo.Templating.Liquid.GuardedRead.SpecialFileTimeout = previous;
-            using (var release = new FileStream(fifo, FileMode.Open, FileAccess.Write))
-            {
-                // a writer lets the blocked reader thread finish
-            }
+            TabTabGo.Templating.Liquid.GuardedRead.OpenTimeout = previous;
         }
     }
 
@@ -141,5 +137,107 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "_empty.liquid"), string.Empty);
 
         Assert.Equal(string.Empty, new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'empty'"));
+    }
+
+    private static bool TryMakeFifo(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        using var make = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("mkfifo", path) { RedirectStandardError = true });
+        make!.WaitForExit();
+        return make.ExitCode == 0;
+    }
+
+    private static readonly Func<EnhancedLocalFileSystem, string, string> Read = (fs, name) => fs.ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'" + name + "'");
+
+    [Fact]
+    public void G2_TwentyConcurrentReadsOfAFifo_AreAllPathFree_WithinTheTimeout_AndLeaveNoThreadsBehind()
+    {
+        if (!TryMakeFifo(Path.Combine(_root, "_pipe2.liquid")))
+        {
+            return;
+        }
+
+        var fs = new EnhancedLocalFileSystem(_root);
+        var previous = GuardedRead.OpenTimeout;
+        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var failures = new Exception[20];
+
+            System.Threading.Tasks.Parallel.For(0, 20, new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 20 }, i => failures[i] = Record.Exception(() => Read(fs, "pipe2"))!);
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(8), $"took {watch.Elapsed}");
+            Assert.All(failures, ex =>
+            {
+                Assert.IsType<FileSystemException>(ex);
+                Assert.DoesNotContain(_root, ex.Message);
+            });
+        }
+        finally
+        {
+            GuardedRead.OpenTimeout = previous;
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while ((GuardedRead.StuckReaders > 0 || GuardedRead.LiveWorkers > 0) && DateTime.UtcNow < deadline)
+        {
+            System.Threading.Thread.Sleep(50);
+        }
+
+        Assert.Equal(0, GuardedRead.StuckReaders);
+        Assert.Equal(0, GuardedRead.LiveWorkers); // every worker thread has ended: none leaked per request
+    }
+
+    [Fact]
+    public void G1_ARegularPartialSwappedForAFifoBetweenTheDecisionAndTheOpen_IsStillRefused()
+    {
+        File.WriteAllText(Path.Combine(_root, "_swap.liquid"), "regular");
+        if (!TryMakeFifo(Path.Combine(_root, "swap.fifo")))
+        {
+            return;
+        }
+
+        var previous = GuardedRead.OpenTimeout;
+        GuardedRead.OpenTimeout = TimeSpan.FromMilliseconds(1000);
+        GuardedRead.BeforeOpen = p =>
+        {
+            if (!p.EndsWith("swap.xml", StringComparison.Ordinal) && !p.EndsWith("_swap.liquid", StringComparison.Ordinal))
+            {
+                return; // other tests may read files while this hook is set
+            }
+
+            File.Delete(p);
+            File.Move(Path.Combine(_root, "swap.fifo"), p);
+        };
+        try
+        {
+            var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "swap"));
+
+            Assert.DoesNotContain(_root, ex.Message);
+        }
+        finally
+        {
+            GuardedRead.BeforeOpen = null;
+            GuardedRead.OpenTimeout = previous;
+        }
+    }
+
+    [Fact]
+    public void G1_RegularPartials_StillReadCorrectlyAndFast()
+    {
+        var fs = new EnhancedLocalFileSystem(_root);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        for (var i = 0; i < 200; i++)
+        {
+            Assert.Equal("root-part", Read(fs, "part"));
+        }
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
     }
 }

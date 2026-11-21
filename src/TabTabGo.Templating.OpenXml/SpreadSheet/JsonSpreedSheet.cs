@@ -281,15 +281,15 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     MaxCharactersInDocument = _options.MaxXmlCharacters,
                 };
 
-                return GuardedRead.Run(full, () =>
+                return GuardedRead.Read(full, stream =>
                 {
-                    using (var reader = System.Xml.XmlReader.Create(full, settings))
+                    using (var reader = System.Xml.XmlReader.Create(stream, settings))
                     {
                         return XDocument.Load(reader);
                     }
                 });
             }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException || ex is TimeoutException)
+            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
             {
                 // an unreadable file, a directory, a pipe: the system message carries the absolute path, ours does not
                 throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
