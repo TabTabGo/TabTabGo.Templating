@@ -268,6 +268,7 @@ internal static class TemplateNesting
     {
         var tokens = new List<string>();
         var i = 0;
+        var noCommentClose = false; // once the search for "#}" fails from a position, no "#}" exists after it: later {# are not searched again (keeps repeated {# linear)
         while (i < template.Length - 1)
         {
             var open = template.IndexOf('{', i);
@@ -280,9 +281,10 @@ internal static class TemplateNesting
             if (kind == '#')
             {
                 // the {# ... #} shorthand is a comment block for DotLiquid's parser (it rewrites it to {% comment %}...{% endcomment %})
-                var close = template.IndexOf("#}", open + 2, StringComparison.Ordinal);
+                var close = noCommentClose ? -1 : template.IndexOf("#}", open + 2, StringComparison.Ordinal);
                 if (close < 0)
                 {
+                    noCommentClose = true;
                     i = open + 2; // an unclosed {# is text; the tags after it still count
                     continue;
                 }
