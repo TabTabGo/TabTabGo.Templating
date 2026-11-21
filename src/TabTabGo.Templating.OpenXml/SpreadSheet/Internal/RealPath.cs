@@ -8,11 +8,17 @@ internal static class RealPath
     /// <summary>Whether <paramref name="path"/> resolves, through every link, to a location inside <paramref name="root"/>.</summary>
     /// <param name="root">An absolute folder path.</param>
     /// <param name="path">An absolute file path.</param>
-    public static bool IsInside(string root, string path)
+    public static bool IsInside(string root, string path) => ResolveInside(root, path) != null;
+
+    /// <summary>The real path of <paramref name="path"/> when it lies inside <paramref name="root"/>, otherwise null. Callers open this resolved path, not the one they were given.</summary>
+    /// <param name="root">An absolute folder path.</param>
+    /// <param name="path">An absolute file path.</param>
+    public static string? ResolveInside(string root, string path)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var realRoot = Resolve(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + Path.DirectorySeparatorChar;
-        return Resolve(path).StartsWith(realRoot, comparison);
+        var real = Resolve(path);
+        return real.StartsWith(realRoot, comparison) ? real : null;
     }
 
     /// <summary>

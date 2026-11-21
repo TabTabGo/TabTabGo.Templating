@@ -522,10 +522,8 @@ public class JsonSpreedSheet
         try
         {
             // a symbolic link inside the root may point outside it: compare the real paths
-            if (!RealPath.IsInside(root, full))
-            {
-                throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
-            }
+            var real = RealPath.ResolveInside(root, full)
+                ?? throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
 
             var settings = new System.Xml.XmlReaderSettings
             {
@@ -534,7 +532,7 @@ public class JsonSpreedSheet
                 MaxCharactersInDocument = _options.MaxXmlCharacters,
             };
 
-            return GuardedRead.Read(full, stream =>
+            return GuardedRead.Read(real, stream => // the resolved path is what is opened
             {
                 using var reader = System.Xml.XmlReader.Create(stream, settings);
                 return XDocument.Load(reader);
