@@ -21,7 +21,7 @@ namespace TabTabGo.Templating.Liquid
         internal const long MaxBytes = 16 * 1024 * 1024;
 
         /// <summary>Replaces the open (tests hand back a stream that lies about its length).</summary>
-        internal static Func<string, Stream> OpenOverride { get; set; }
+        internal static Func<string, Stream>? OpenOverride { get; set; }
 
         /// <summary>Opens <paramref name="path"/> once, refuses anything that is not a seekable file of usable size, and hands a capped view of the same stream to <paramref name="consume"/>.</summary>
         public static T Read<T>(string path, Func<Stream, T> consume)

@@ -207,7 +207,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     }
 
     [Fact]
-    public void Device_ReachedThroughASymbolicLink_IsRefused_AndADirectoryIsNotAPartial()
+    public void Device_ReachedThroughASymbolicLink_NeverBlocksAndLeaksNoPath_AndADirectoryIsNotAPartial()
     {
         Directory.CreateDirectory(Path.Combine(_root, "_dir.liquid"));
         if (!OperatingSystem.IsWindows() && TryLink(Path.Combine(_root, "_null.liquid"), "/dev/null", directory: false))

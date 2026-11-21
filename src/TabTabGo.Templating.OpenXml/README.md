@@ -31,6 +31,8 @@ Cell expressions understand binary and `SUM` expressions (`CellExpression` famil
 (`JsonSpreedSheet`). Cell `DataType` is one of `String`, `Number`, `Boolean`, `Date`, `Error`, `SharedString`,
 `InlineString` (unknown names become `String`). Before 8.0.4 this mode threw for every cell (bug X-1).
 
+**Known limitation: the template and stylesheet folders must not be writable by untrusted parties.** .NET cannot tell a named pipe or a device file from an empty regular file before opening it (all report `FileAttributes.Normal` and length 0), and a plain open of a named pipe blocks the render thread, so no managed check can refuse one; no native call is made because none is portable to musl, macOS and Windows alike. Someone who can create a pipe in those folders can already replace the templates themselves. Files are read through a byte-counting cap of 16 MB.
+
 ## Behaviour notes
 
 * A JSON workbook may name a stylesheet (`Workbook.Stylesheets.TemplatePath`). The path must be relative and stay inside

@@ -94,9 +94,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     BestFit = BooleanValue.FromBoolean(ReadBoolean(jColumn["BestFit"], "Column BestFit"))
                 };
 
-                if (jColumn["Width"] != null && jColumn["Width"].Type != JTokenType.Null)
+                if (jColumn["Width"] is JToken widthToken && widthToken.Type != JTokenType.Null)
                 {
-                    var width = ReadDouble(jColumn["Width"], "Column Width");
+                    var width = ReadDouble(widthToken, "Column Width");
                     if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
                     {
                         throw new ArgumentException($"Column Width must be a number from 0 to 255 ({jColumn["Width"]}).", "json");
@@ -506,7 +506,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             throw new ArgumentException($"{what} must be a number ({token}).", "json");
         }
 
-        private static bool ReadBoolean(JToken token, string what)
+        private static bool ReadBoolean(JToken? token, string what)
         {
             if (token == null || token.Type == JTokenType.Null)
             {
@@ -552,7 +552,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         }
 
         /// <summary>The real path of <paramref name="path"/> when it lies inside <paramref name="root"/>, otherwise null; callers open this resolved path.</summary>
-        private static string RealPathInside(string root, string path)
+        private static string? RealPathInside(string root, string path)
         {
             var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var realRoot = ResolveLinks(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) + Path.DirectorySeparatorChar;
