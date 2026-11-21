@@ -81,4 +81,34 @@ public sealed class TemplateNestingHardeningTests
         Assert.Equal(new[] { "{% if a %}", "{{ b }}" }, TemplateNesting.FallbackTokens("x{% if a %}y{{ b }}z"));
         Assert.Equal(200_000, TemplateNesting.FallbackTokens(string.Concat(Enumerable.Repeat("{%a%}", 200_000))).Count);
     }
+
+    [Fact]
+    public void FallbackScan_GetsTheMaximumStack_TheExactTokenizerGetsTheFormula()
+    {
+        var real = TemplateNesting.CreateTokenizer(typeof(Template).Assembly.GetType("DotLiquid.Tokenizer"));
+
+        Assert.Equal(256 * 1024 * 1024, TemplateNesting.StackFor(100, null));
+        Assert.Equal(TemplateNesting.ParseStackBytes(100), TemplateNesting.StackFor(100, real));
+        Assert.True(TemplateNesting.StackFor(100, real) < TemplateNesting.StackFor(100, null));
+    }
+
+    [Fact]
+    public void FallbackDepth_OfWhitespaceControlNesting_EqualsTheRealTokenizers()
+    {
+        var template = Nested(500, "{%- if x -%}", "{%- endif -%}");
+        var real = TemplateNesting.CreateTokenizer(typeof(Template).Assembly.GetType("DotLiquid.Tokenizer"));
+
+        Assert.Equal(500, TemplateNesting.Depth(TemplateNesting.Tokens(template, real), int.MaxValue));
+        Assert.Equal(500, TemplateNesting.Depth(TemplateNesting.Tokens(template, null), int.MaxValue));
+    }
+
+    [Fact]
+    public void WithoutTheTokenizer_WhitespaceControlTags_AreCounted()
+    {
+        var template = Nested(5_000, "{%- if x -%}", "{%- endif -%}");
+
+        Assert.Equal(5_000, TemplateNesting.Depth(TemplateNesting.Tokens(template, null), int.MaxValue));
+        Assert.Equal(5_000, TemplateNesting.Depth(TemplateNesting.Tokens(template, TemplateNesting.CreateTokenizer(typeof(Template).Assembly.GetType("DotLiquid.Tokenizer"))), int.MaxValue));
+        Assert.Equal(2, TemplateNesting.Depth(TemplateNesting.Tokens("{%-if a-%}{%- for i in a -%}{%- endfor -%}{%- endif -%}", null), int.MaxValue));
+    }
 }

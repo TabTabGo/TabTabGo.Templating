@@ -87,8 +87,8 @@ public sealed class JsonSpreedSheetCellTests
         Assert.Equal("45356", cells[0].CellValue!.Text);
         Assert.Equal("45355.833333333336", cells[1].CellValue!.Text);
         Assert.Equal("45356", cells[2].CellValue!.Text);
-        Assert.Equal(new[] { string.Empty, string.Empty, string.Empty }, cells.Skip(3).Take(3).Select(c => c.CellValue!.Text));
-        Assert.All(cells, c => Assert.Equal(CellValues.Number, c.DataType!.Value));
+        Assert.All(cells.Skip(3).Take(3), c => { Assert.Null(c.CellValue); Assert.Null(c.DataType); }); // B1: an empty date is an empty cell, not <c t="n"><v/></c>
+        Assert.All(cells.Take(3).Append(cells[6]), c => Assert.Equal(CellValues.Number, c.DataType!.Value));
         Assert.Equal(5u, cells[0].StyleIndex!.Value); // no style found: the built-in date style
         Assert.Equal(4u, cells[6].StyleIndex!.Value);                                    // a named style wins
     }
@@ -112,7 +112,7 @@ public sealed class JsonSpreedSheetCellTests
             Row(Cell("Number", 1, "Bold")),                                            // header: never alternates
             Row(Cell("Number", 1, "Bold")),                                            // first body row: normal
             Row(Cell("Number", 1, "Bold"), Cell("Number", 1, "Plain")),                // second body row: the alternative index where there is one
-            Row(Cell("Number", 1), Cell("Number", 1, "No Such"), Cell("Number", 1, "O'Brien"), Cell("Number", 1, "Plain", style: 9))));
+            Row(Cell("Number", 1), Cell("Number", 1, "No Such"), Cell("Number", 1, "O'Brien"), Cell("Number", 1, "Plain", style: 5))));
 
         Assert.Equal(2u, Cells(workbook, 0)[0].StyleIndex!.Value);
         Assert.Equal(2u, Cells(workbook, 1)[0].StyleIndex!.Value);
@@ -120,7 +120,7 @@ public sealed class JsonSpreedSheetCellTests
         Assert.Equal(3u, alternate[0].StyleIndex!.Value);
         Assert.Equal(4u, alternate[1].StyleIndex!.Value); // no alternative index: the normal one
         var last = Cells(workbook, 3);
-        Assert.Equal(new[] { 1u, 0u, 0u, 9u }, last.Select(c => c.StyleIndex!.Value)); // empty format = Normal; unknown name = 0; explicit index wins
+        Assert.Equal(new[] { 1u, 0u, 0u, 5u }, last.Select(c => c.StyleIndex!.Value)); // empty format = Normal; unknown name = 0; explicit index wins
     }
 
     [Fact]

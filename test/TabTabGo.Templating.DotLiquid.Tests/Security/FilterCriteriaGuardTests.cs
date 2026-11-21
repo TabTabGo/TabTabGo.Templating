@@ -120,6 +120,14 @@ public class FilterCriteriaGuardTests
         Assert.Equal("1", Ids(CollectionFilters.Filter(Rows(), "Math.Abs(1) = 1 && it[\"k\"].ToString().Substring(0, 1) = \"a\"")));
         Assert.Equal("1", Ids(CollectionFilters.Filter(Rows(), "it[\"id\"].ToString() = \"1\" and (it[\"k\"].ToString() = \"a\")")));
         Assert.Equal("2", Ids(CollectionFilters.Filter(Rows(), "it[\"n\"].ToString().ToLower() = \"7\"")));
+        Assert.Equal("2", Ids(CollectionFilters.Filter(Rows(), "it[\"k\"].ToString() > \"a\"")));
+        Assert.Equal("1", Ids(CollectionFilters.Filter(Rows(), "it[\"k\"].ToString() < \"b\"")));
+        Assert.Equal("1,2", Ids(CollectionFilters.Filter(Rows(), "it[\"k\"].ToString() >= \"a\"")));
+        Assert.Equal("1,2", Ids(CollectionFilters.Filter(Rows(), "it[\"k\"].ToString() <= \"bb\"")));
+        Assert.Equal("1,2", Ids(CollectionFilters.Filter(Rows(), "!string.IsNullOrEmpty(it[\"k\"].ToString())")));
+        Assert.Equal("1,2", Ids(CollectionFilters.Filter(Rows(), "!string.IsNullOrWhiteSpace(it[\"k\"].ToString())")));
+        Assert.Equal("", Ids(CollectionFilters.Filter(Rows(), "string.IsNullOrEmpty(it[\"k\"].ToString())")));
+        Assert.Equal("2", Ids(CollectionFilters.Filter(Rows(), "string.Compare(it[\"k\"].ToString(), \"a\") > 0")));
     }
 
     [Fact]
