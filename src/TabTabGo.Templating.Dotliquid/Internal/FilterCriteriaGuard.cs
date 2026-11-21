@@ -33,11 +33,20 @@ internal static class FilterCriteriaGuard
     /// <summary>The most string, Math and Convert calls one expression may make (indexers and <c>ToString()</c> are not counted).</summary>
     internal const int MaxCalls = 32;
 
-    /// <summary>Criteria up to this length and <see cref="ShallowNesting"/> are parsed on the caller's thread (measured on a 256 KB stack, see the tests).</summary>
-    internal const int ShallowCharacters = 200;
+    /// <summary>
+    /// Criteria up to this length, <see cref="ShallowNesting"/> deep, without brackets, braces, <c>new</c> or lambdas, are parsed on the caller's thread when
+    /// <see cref="StackMarginLevels"/> levels of margin remain. Measured (cold JIT, one process per shape, minimum survivable caller stack): the eligible shapes need under
+    /// 100 KB; shapes with <c>[</c>, <c>{</c>, <c>new</c> or <c>=&gt;</c> need up to about 330 KB within 200 characters and are never eligible.
+    /// </summary>
+    internal const int ShallowCharacters = 64;
 
-    /// <summary>The deepest nesting parsed on the caller's thread.</summary>
-    internal const int ShallowNesting = 16;
+    /// <summary>The deepest parenthesis, sign and <c>not</c> nesting parsed on the caller's thread.</summary>
+    internal const int ShallowNesting = 8;
+
+    /// <summary>Probe levels of 16 KB each: 8 levels plus the 128 KB that <c>TryEnsureSufficientExecutionStack</c> guarantees leave at least 256 KB for the parse.</summary>
+    internal const int StackMarginLevels = 8;
+
+    private static readonly object CacheLock = new();
 
     private const int MaxCachedPredicates = 256;
 
@@ -89,21 +98,78 @@ internal static class FilterCriteriaGuard
         }
 
         var nesting = CheckNesting(criteria);
-        var predicate = criteria.Length <= ShallowCharacters && nesting <= ShallowNesting && RuntimeHelpers.TryEnsureSufficientExecutionStack()
+        var predicate = IsShallow(criteria, nesting) && HasStackMargin(StackMarginLevels)
             ? ParseOnThisThread(criteria)
             : ParseOnLargeStack(criteria);
 
-        if (Cache.Count >= MaxCachedPredicates)
+        lock (CacheLock)
         {
-            Cache.Clear(); // clear on full: the cache is a bound, not a policy
+            // the miss path only: reads stay lock-free. Clear on full: the cache is a bound, not a policy.
+            if (Cache.Count >= MaxCachedPredicates && !Cache.ContainsKey(criteria))
+            {
+                Cache.Clear();
+            }
+
+            Cache[criteria] = predicate;
         }
 
-        Cache[criteria] = predicate;
         return predicate;
     }
 
+    /// <summary>Whether the text is small and plain enough for the caller's thread: short, shallow, and none of the constructs whose parse recurses without a check (indexers, braces, <c>new</c>, lambdas).</summary>
+    /// <param name="criteria">The expression text.</param>
+    /// <param name="nesting">The nesting <see cref="CheckNesting"/> measured.</param>
+    internal static bool IsShallow(string criteria, int nesting)
+    {
+        if (criteria.Length > ShallowCharacters || nesting > ShallowNesting || criteria.Contains('[') || criteria.Contains('{') || criteria.Contains("=>", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        for (var i = criteria.IndexOf("new", StringComparison.OrdinalIgnoreCase); i >= 0; i = criteria.IndexOf("new", i + 1, StringComparison.OrdinalIgnoreCase))
+        {
+            var before = i == 0 || !(char.IsLetterOrDigit(criteria[i - 1]) || criteria[i - 1] == '_');
+            var after = i + 3 >= criteria.Length || !(char.IsLetterOrDigit(criteria[i + 3]) || criteria[i + 3] == '_');
+            if (before && after)
+            {
+                return false; // the token new
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True when at least 256 KB of stack remain: each level takes 16 KB of real stack and asks the runtime whether 128 KB are still free behind it, so a true answer after
+    /// <paramref name="levels"/> levels means <c>levels * 16 KB + 128 KB</c> were free at the start. (The runtime's own check only promises about 128 KB.)
+    /// </summary>
+    /// <param name="levels">How many 16 KB levels to probe.</param>
+    internal static bool HasStackMargin(int levels)
+    {
+        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            return false;
+        }
+
+        if (levels == 0)
+        {
+            return true;
+        }
+
+        Span<byte> pad = stackalloc byte[16 * 1024];
+        pad[0] = 1;
+        pad[^1] = 1;
+        return HasStackMargin(levels - 1) && pad[0] == 1 && pad[^1] == 1;
+    }
+
     /// <summary>Drops every cached predicate (tests).</summary>
-    internal static void ClearCache() => Cache.Clear();
+    internal static void ClearCache()
+    {
+        lock (CacheLock)
+        {
+            Cache.Clear();
+        }
+    }
 
     /// <summary>The number of cached predicates (tests).</summary>
     internal static int CachedCount => Cache.Count;

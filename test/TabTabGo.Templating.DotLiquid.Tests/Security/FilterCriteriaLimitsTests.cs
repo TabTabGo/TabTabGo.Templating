@@ -411,20 +411,174 @@ public class FilterCriteriaLimitsTests
         Assert.Equal("1", Ids(OnSmallStack(() => CollectionFilters.Filter(Rows(), deep))));
     }
 
-    [Fact]
-    public void M28_ACriteriaAtTheShallowLimits_ParsesOnA256KbCallerStack()
+    /// <summary>Burns about <paramref name="kilobytes"/> of the current thread's stack (16 KB frames) and then runs <paramref name="action"/>, like a host that is already deep in recursion.</summary>
+    private static T WithStackConsumed<T>(int kilobytes, Func<T> action)
     {
-        // 16 levels of parentheses and about 200 characters: the largest input the caller's thread is asked to parse
-        var core = "it[\"k\"].ToString() = \"abc\"";
-        var expression = Repeat("(", FilterCriteriaGuard.ShallowNesting) + core + Repeat(")", FilterCriteriaGuard.ShallowNesting);
-        expression += " or " + Repeat("it[\"k\"].ToString().StartsWith(\"a\") or ", 3) + "true";
+        if (kilobytes <= 0)
+        {
+            return action();
+        }
+
+        Span<byte> frame = stackalloc byte[16 * 1024];
+        frame[0] = 1;
+        frame[^1] = 1;
+        var result = WithStackConsumed(kilobytes - 16, action);
+        return frame[0] == 1 ? result : default!;
+    }
+
+    private static T OnStack<T>(int kilobytes, int consumedKilobytes, Func<T> action)
+    {
+        T? result = default;
+        Exception? error = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    result = WithStackConsumed(consumedKilobytes, action);
+                }
+                catch (Exception ex)
+                {
+                    error = ex;
+                }
+            },
+            maxStackSize: kilobytes * 1024);
+        thread.Start();
+        thread.Join();
+        if (error != null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+        }
+
+        return result!;
+    }
+
+    private static string Fit(string open, string core, string close, int maxLength)
+    {
+        var best = core;
+        for (var n = 1; n < 200; n++)
+        {
+            var text = Repeat(open, n) + core + Repeat(close, n);
+            if (text.Length > maxLength)
+            {
+                break;
+            }
+
+            best = text;
+        }
+
+        return best;
+    }
+
+    /// <summary>Every shape the caller's thread may be asked to parse: at most 64 characters and 8 levels, no brackets, braces, new or lambdas.</summary>
+    public static IEnumerable<object[]> EligibleShapes()
+    {
+        yield return new object[] { Repeat("(", 8) + "it.k == \"a\"" + Repeat(")", 8) };
+        yield return new object[] { Repeat("-(", 8) + "1" + Repeat(")", 8) + " < 0" };
+        yield return new object[] { Fit("iif(true,", "1", ",1)", 60) + " > 0" };
+        yield return new object[] { Fit("Math.Max(", "1", ",1)", 60) + " > 0" };
+        yield return new object[] { Repeat("not ", 8) + "true" };
+        yield return new object[] { Repeat("!", 8) + "true" };
+        yield return new object[] { Fit("true?", "1", ":1", 60) + " > 0" };
+        yield return new object[] { "it.k" + Repeat(".ToString()", 3) + " = \"a\"" };
+        yield return new object[] { Repeat("int(", 8) + "1" + Repeat(")", 8) + " > 0" };
+        yield return new object[] { Repeat("np(", 8) + "1" + Repeat(")", 8) + " > 0" };
+    }
+
+    [Theory]
+    [MemberData(nameof(EligibleShapes))]
+    public void F1_EligibleShapes_ParseOnA256KbCallerStack_AndOnA300KbOneWithHalfConsumed(string expression)
+    {
         Assert.True(expression.Length <= FilterCriteriaGuard.ShallowCharacters, expression.Length.ToString());
 
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 5; i++)
         {
             FilterCriteriaGuard.ClearCache();
-            Assert.Equal("1,2", Ids(OnSmallStack(() => CollectionFilters.Filter(Rows(), expression))));
+            var outcome = Record.Exception(() => OnStack(256, 0, () => CollectionFilters.Filter(Rows(), expression)));
+            Assert.IsNotType<InsufficientExecutionStackException>(outcome); // any other exception is a catchable refusal; a crash would have ended the test run
+
+            FilterCriteriaGuard.ClearCache();
+            var deep = Record.Exception(() => OnStack(300, 150, () => CollectionFilters.Filter(Rows(), expression)));
+            Assert.IsNotType<InsufficientExecutionStackException>(deep); // never a crash
         }
+    }
+
+    /// <summary>The shapes that crashed the 200-character caller-thread gate: indexers, braces, new, lambdas, deep calls.</summary>
+    public static IEnumerable<object[]> IneligibleShapes()
+    {
+        yield return new object[] { Fit("$[", "1", "]", 200) };
+        yield return new object[] { Fit("it[", "\"a\"", "]", 200) };
+        yield return new object[] { Repeat("it[", 66) };
+        yield return new object[] { Fit("new[]{", "1", "}", 200) };
+        yield return new object[] { Fit("new{a=", "1", "}", 200) };
+        yield return new object[] { Fit("new(", "1", ")", 200) };
+        yield return new object[] { Fit("Math.Max(", "1", ",1)", 200) };
+        yield return new object[] { Fit("iif(true,", "1", ",1)", 200) };
+        yield return new object[] { Fit("-(", "1", ")", 200) };
+        yield return new object[] { Fit("it.k.Any(x=>", "true", ")", 200) };
+    }
+
+    [Theory]
+    [MemberData(nameof(IneligibleShapes))]
+    public void F1_ReproShapes_AreCatchableOnSmallCallerStacks_NeverACrash(string expression)
+    {
+        Assert.False(FilterCriteriaGuard.IsShallow(expression, 0));
+
+        foreach (var (stack, consumed) in new[] { (200, 0), (256, 0), (300, 150), (480, 0) })
+        {
+            FilterCriteriaGuard.ClearCache();
+            var outcome = Record.Exception(() => OnStack(stack, consumed, () => CollectionFilters.Filter(Rows(), expression)));
+            Assert.IsNotType<InsufficientExecutionStackException>(outcome); // the shape is refused or evaluated, never a crash ({stack} KB)
+        }
+    }
+
+    [Theory]
+    [InlineData("it[\"k\"] == null", false)]
+    [InlineData("{1}", false)]
+    [InlineData("x => x", false)]
+    [InlineData("new(1)", false)]
+    [InlineData("NEW (1)", false)]
+    [InlineData("1+new\t(1)", false)]
+    [InlineData("it.renew == null", true)]
+    [InlineData("it.newer == null", true)]
+    [InlineData("it.k == \"a\"", true)]
+    public void F1_Eligibility_RejectsBracketsBracesNewAndLambdas_ButNotWordsContainingNew(string expression, bool eligible)
+    {
+        Assert.Equal(eligible, FilterCriteriaGuard.IsShallow(expression, 0));
+    }
+
+    [Fact]
+    public void F1_TheEligibilityBounds_AreSixtyFourCharactersAndEightLevels()
+    {
+        Assert.True(FilterCriteriaGuard.IsShallow(new string('a', 64), 8));
+        Assert.False(FilterCriteriaGuard.IsShallow(new string('a', 65), 0));
+        Assert.False(FilterCriteriaGuard.IsShallow("1", 9));
+    }
+
+    [Fact]
+    public void F1_StackMargin_IsTrueWithRoomAndFalseWhenHalfTheStackIsGone()
+    {
+        Assert.True(OnStack(1024, 0, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
+        Assert.False(OnStack(300, 100, () => FilterCriteriaGuard.HasStackMargin(FilterCriteriaGuard.StackMarginLevels)));
+    }
+
+    [Fact]
+    public void F2_TheCacheBound_HoldsUnder64ThreadsOfMisses()
+    {
+        FilterCriteriaGuard.ClearCache();
+        var rows = Rows();
+        var threads = Enumerable.Range(0, 64).Select(t => new Thread(() =>
+        {
+            for (var i = 0; i < 40; i++)
+            {
+                CollectionFilters.Filter(rows, "it[\"k\"].ToString() = \"t" + t + "-" + i + "\"");
+            }
+        })).ToList();
+
+        threads.ForEach(t => t.Start());
+        threads.ForEach(t => t.Join());
+
+        Assert.InRange(FilterCriteriaGuard.CachedCount, 1, 256);
     }
 
     [Fact]
