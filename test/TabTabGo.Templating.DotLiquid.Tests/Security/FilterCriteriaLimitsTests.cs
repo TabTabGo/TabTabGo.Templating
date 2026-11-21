@@ -332,4 +332,128 @@ public class FilterCriteriaLimitsTests
         Assert.Equal("1", Ids(CollectionFilters.Filter(rows, "it[\"k\"].ToString().IndexOf(\"Al\", 3) = 7")));
         Assert.Equal("1", Ids(CollectionFilters.Filter(rows, "string.Compare(it[\"k\"].ToString(), 1, \"Alice\", 0, 5) = 0")));
     }
+
+    // ---- round 3: m-28 cache and caller-thread parse, m-29 call counting
+
+    [Fact]
+    public void M29_ThirtyTwoStartsWithCalls_Pass_AndThirtyThreeAreRefused()
+    {
+        string Calls(int count) => string.Join(" or ", Enumerable.Repeat("\"abc\".StartsWith(\"a\")", count));
+
+        Assert.Equal("1,2", Ids(CollectionFilters.Filter(Rows(), Calls(FilterCriteriaGuard.MaxCalls))));
+        Assert.Contains("method calls", Assert.Throws<ArgumentException>(() => CollectionFilters.Filter(Rows(), Calls(FilterCriteriaGuard.MaxCalls + 1))).Message);
+    }
+
+    [Fact]
+    public void M28_ARepeatedCriteria_IsCompiledOnce_AndHitsStillCheckTheRenderTimeout()
+    {
+        FilterCriteriaGuard.ClearCache();
+        const string criteria = "it[\"k\"].ToString() = \"abc\"";
+
+        Assert.Equal("1", Ids(CollectionFilters.Filter(Rows(), criteria)));
+        var first = FilterCriteriaGuard.Compile(criteria);
+        Assert.Same(first, FilterCriteriaGuard.Compile(criteria));
+        Assert.Equal(1, FilterCriteriaGuard.CachedCount);
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        using var scope = RenderScope.Begin(new TemplatingOptions(), null, cancelled.Token);
+        Assert.Throws<RenderLimitExceededException>(() => CollectionFilters.Filter(Rows(), criteria)); // a cache hit is still checked per row
+    }
+
+    [Fact]
+    public void M28_RefusedCriteria_AreNeverCached_AndAreRefusedEveryTime()
+    {
+        FilterCriteriaGuard.ClearCache();
+        const string refused = "it[\"k\"].ToString().PadLeft(5).Length > 0";
+
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Throws<ArgumentException>(() => CollectionFilters.Filter(Rows(), refused));
+        }
+
+        Assert.Equal(0, FilterCriteriaGuard.CachedCount);
+    }
+
+    [Fact]
+    public void M28_TheCache_IsBounded()
+    {
+        FilterCriteriaGuard.ClearCache();
+
+        for (var i = 0; i < 600; i++)
+        {
+            CollectionFilters.Filter(Rows(), "it[\"k\"].ToString() = \"v" + i + "\"");
+        }
+
+        Assert.InRange(FilterCriteriaGuard.CachedCount, 1, 256);
+    }
+
+    [Fact]
+    public void M28_ConcurrentCalls_ShareThePredicate_WithoutSharedState()
+    {
+        FilterCriteriaGuard.ClearCache();
+        var results = new string[64];
+
+        Parallel.For(0, results.Length, new ParallelOptions { MaxDegreeOfParallelism = 16 }, i =>
+        {
+            results[i] = Ids(CollectionFilters.Filter(Rows(), "it[\"k\"].ToString() = \"abc\" or it[\"id\"].ToString() = \"" + (i % 2 + 1) + "\""));
+        });
+
+        Assert.All(results.Select((r, i) => (r, i)), t => Assert.Equal(t.i % 2 == 0 ? "1" : "1,2", t.r));
+    }
+
+    [Fact]
+    public void M28_ACriteriaAboveTheShallowNesting_StillParsesOnA256KbCallerStack()
+    {
+        FilterCriteriaGuard.ClearCache();
+        var deep = Repeat("(", 40) + "it[\"k\"].ToString() = \"abc\"" + Repeat(")", 40); // above the shallow nesting, within the cap
+
+        Assert.Equal("1", Ids(OnSmallStack(() => CollectionFilters.Filter(Rows(), deep))));
+    }
+
+    [Fact]
+    public void M28_ACriteriaAtTheShallowLimits_ParsesOnA256KbCallerStack()
+    {
+        // 16 levels of parentheses and about 200 characters: the largest input the caller's thread is asked to parse
+        var core = "it[\"k\"].ToString() = \"abc\"";
+        var expression = Repeat("(", FilterCriteriaGuard.ShallowNesting) + core + Repeat(")", FilterCriteriaGuard.ShallowNesting);
+        expression += " or " + Repeat("it[\"k\"].ToString().StartsWith(\"a\") or ", 3) + "true";
+        Assert.True(expression.Length <= FilterCriteriaGuard.ShallowCharacters, expression.Length.ToString());
+
+        for (var i = 0; i < 20; i++)
+        {
+            FilterCriteriaGuard.ClearCache();
+            Assert.Equal("1,2", Ids(OnSmallStack(() => CollectionFilters.Filter(Rows(), expression))));
+        }
+    }
+
+    [Fact]
+    public void M28_CachedAndUncachedCalls_PerSecond()
+    {
+        var criteria = "it[\"k\"].ToString() = \"abc\"";
+        var rows = Rows();
+        const int calls = 2_000;
+
+        FilterCriteriaGuard.ClearCache();
+        var cold = Stopwatch.StartNew();
+        for (var i = 0; i < calls / 10; i++)
+        {
+            FilterCriteriaGuard.ClearCache();
+            CollectionFilters.Filter(rows, criteria);
+        }
+
+        cold.Stop();
+        var warm = Stopwatch.StartNew();
+        for (var i = 0; i < calls; i++)
+        {
+            CollectionFilters.Filter(rows, criteria);
+        }
+
+        warm.Stop();
+        var coldPerSecond = (calls / 10) / cold.Elapsed.TotalSeconds;
+        var warmPerSecond = calls / warm.Elapsed.TotalSeconds;
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "ttg-filter-bench.txt"), $"parse each call: {coldPerSecond:F0}/s; cached: {warmPerSecond:F0}/s");
+
+        Assert.True(warmPerSecond > coldPerSecond, $"cached {warmPerSecond:F0}/s vs uncached {coldPerSecond:F0}/s");
+    }
 }

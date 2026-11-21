@@ -120,6 +120,47 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     }
 
     [Fact]
+    public void ReadTemplateFile_DanglingLinkInsideTheRoot_ThrowsWithoutAServerPath()
+    {
+        if (!TryLink(Path.Combine(_root, "_dangling.liquid"), "nonexistent.liquid", directory: false))
+        {
+            return;
+        }
+
+        var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'dangling'"));
+
+        Assert.DoesNotContain(_root, ex.Message);
+        Assert.DoesNotContain(Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar), ex.Message);
+    }
+
+    [Fact]
+    public void ReadTemplateFile_UnreadableFile_ThrowsWithoutAServerPath()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var path = Path.Combine(_root, "_locked.liquid");
+        File.WriteAllText(path, "x");
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        try
+        {
+            if (Environment.UserName == "root")
+            {
+                return; // root reads everything
+            }
+
+            var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'locked'"));
+            Assert.DoesNotContain(_root, ex.Message);
+        }
+        finally
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
+
+    [Fact]
     public void ReadTemplateFile_LinksThatStayInsideTheRoot_AreStillRead()
     {
         if (!TryLink(Path.Combine(_root, "sub", "_alias.liquid"), Path.Combine("..", "_part.liquid"), directory: false))

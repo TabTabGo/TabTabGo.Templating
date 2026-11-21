@@ -368,7 +368,9 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     [InlineData("Boolean", "")]
     [InlineData("Date", "")]
     [InlineData("Date", null)]
-    [InlineData("Date", "not a date")]
+    [InlineData("Number", "   ")]
+    [InlineData("Boolean", " \t ")]
+    [InlineData("Date", "  ")]
     public void B1_EmptyNumberBooleanOrDate_IsAnEmptyCell_WithItsStyle(string type, string? value)
     {
         var cell = Assert.Single(Cells(Workbook(new JArray(Row(new JObject { ["DataType"] = type, ["CellValue"] = value == null ? JValue.CreateNull() : value, ["StyleIndex"] = 2 })))));
@@ -486,5 +488,187 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         Assert.Equal("Sheet2", names[0]);
         Assert.NotEqual("Sheet2", names[1], StringComparer.OrdinalIgnoreCase);
         Assert.Equal(2, names.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+    }
+
+    // ---- round 3: Q-1 number/boolean text, Q-2 date serials, N-3 sheet names and ids, N-4 sheet count
+
+    private static IEnumerable<DocumentFormat.OpenXml.Validation.ValidationErrorInfo> Validate(JObject workbook)
+    {
+        using var stream = new MemoryStream();
+        using var document = Write(workbook, stream);
+        return new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(document).ToList();
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData("1,5")]
+    [InlineData("NaN")]
+    [InlineData("Infinity")]
+    [InlineData("1e999")]
+    public void Q1_NumberCell_WithNonNumericText_Throws(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Number", text))))));
+    }
+
+    [Theory]
+    [InlineData("12.50", "12.5")]
+    [InlineData(" 7 ", "7")]
+    [InlineData("1e3", "1000")]
+    [InlineData("-0.1", "-0.1")]
+    public void Q1_NumberCell_WritesTheCanonicalInvariantForm(string text, string expected)
+    {
+        var cell = Assert.Single(Cells(Workbook(new JArray(Row(Cell("Number", text))))));
+
+        Assert.Equal(expected, cell.CellValue!.Text);
+        Assert.Equal(CellValues.Number, cell.DataType!.Value);
+    }
+
+    [Theory]
+    [InlineData("maybe")]
+    [InlineData("2")]
+    [InlineData("yes")]
+    public void Q1_BooleanCell_WithOtherText_Throws(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Boolean", text))))));
+    }
+
+    [Fact]
+    public void Q1_BooleanCell_AcceptsTrueFalseOneZero()
+    {
+        var cells = Cells(Workbook(new JArray(Row(Cell("Boolean", "true"), Cell("Boolean", "FALSE"), Cell("Boolean", "1"), Cell("Boolean", "0")))));
+
+        Assert.Equal(new[] { "1", "0", "1", "0" }, cells.Select(c => c.CellValue!.Text));
+    }
+
+    [Fact]
+    public void Q1_WorkbookWithWhitespaceAndCanonicalNumbers_PassesTheOpenXmlValidator()
+    {
+        var errors = Validate(Workbook(new JArray(Row(Cell("Number", "  "), Cell("Number", "12.50"), Cell("Boolean", " "), Cell("Boolean", "true"), Cell("Date", "  ")))));
+
+        Assert.Empty(errors);
+    }
+
+    [Theory]
+    [InlineData(45000, "45000")]
+    [InlineData(45000.5, "45000.5")]
+    [InlineData(1, "1")]
+    [InlineData(2958465, "2958465")]
+    public void Q2_NumericDate_IsWrittenAsTheSerial(double value, string expected)
+    {
+        var cell = Assert.Single(Cells(Workbook(new JArray(Row(Cell("Date", value))))));
+
+        Assert.Equal(expected, cell.CellValue!.Text);
+        Assert.Equal(CellValues.Number, cell.DataType!.Value);
+    }
+
+    [Fact]
+    public void Q2_NumericTextDate_IsAlsoTheSerial()
+    {
+        var cell = Assert.Single(Cells(Workbook(new JArray(Row(Cell("Date", "45000"))))));
+
+        Assert.Equal("45000", cell.CellValue!.Text);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    [InlineData(2958466)]
+    [InlineData(1e12)]
+    public void Q2_NumericDate_OutOfRange_Throws(double value)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", value))))));
+    }
+
+    [Theory]
+    [InlineData("not a date")]
+    [InlineData("2024-13-45")]
+    public void Q2_UnparseableDate_Throws(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", text))))));
+    }
+
+    [Theory]
+    [InlineData("a\u0001b")]
+    [InlineData("a\u0000b")]
+    [InlineData("a\tb")]
+    [InlineData("a\nb")]
+    [InlineData("a{HI}b")]
+    [InlineData("a{LO}")]
+    [InlineData("{HI}")]
+    public void N3_SheetNameWithControlCharactersOrLoneSurrogates_Throws_BeforeAnythingIsWritten(string template)
+    {
+        var name = template.Replace("{HI}", "\ud800").Replace("{LO}", "\udc00"); // lone surrogates do not survive theory data, so they are built here
+        using var stream = new MemoryStream();
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(stream, Workbook(new JArray(), new JArray(new JObject { ["Name"] = name }))));
+        Assert.Equal(0, stream.Length);
+    }
+
+    [Fact]
+    public void N3_SheetNameWithAValidSurrogatePair_IsAccepted()
+    {
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(new JArray(), new JArray(new JObject { ["Name"] = "R\ud83d\ude00" })), stream);
+
+        Assert.Equal("R\ud83d\ude00", document.WorkbookPart!.Workbook!.Descendants<Sheet>().Single().Name!.Value);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("1.5")]
+    [InlineData("-1")]
+    [InlineData("\"abc\"")]
+    [InlineData("true")]
+    [InlineData("4294967296")]
+    public void N3_InvalidSheetId_Throws(string idJson)
+    {
+        var sheets = new JArray(new JObject { ["SheetId"] = JToken.Parse(idJson), ["Name"] = "A" });
+
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), sheets)));
+    }
+
+    [Fact]
+    public void N3_IntegralFloatAndNumericTextIds_AreAccepted()
+    {
+        using var stream = new MemoryStream();
+        var sheets = new JArray(new JObject { ["SheetId"] = 3.0, ["Name"] = "A" }, new JObject { ["SheetId"] = "4", ["Name"] = "B" });
+        using var document = Write(Workbook(new JArray(), sheets), stream);
+
+        Assert.Equal(new[] { 3u, 4u }, document.WorkbookPart!.Workbook!.Descendants<Sheet>().Select(s => s.SheetId!.Value));
+    }
+
+    [Fact]
+    public void N4_MoreThan255Sheets_Throw_And255Work()
+    {
+        JArray Sheets(int count) => new(Enumerable.Range(0, count).Select(i => new JObject()));
+        using var stream = new MemoryStream();
+
+        using (var document = Write(Workbook(new JArray(), Sheets(255)), stream))
+        {
+            Assert.Equal(255, document.WorkbookPart!.Workbook!.Descendants<Sheet>().Count());
+        }
+
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(), Sheets(256))));
+    }
+
+    [Fact]
+    public void N4_Generation_IsLinear_AndKeepsTheNamingRules()
+    {
+        // 127 unnamed sheets interleaved with 128 sheets explicitly named Sheet1.. : the generated names skip every explicit one
+        var sheets = new JArray();
+        for (var i = 0; i < 255; i++)
+        {
+            sheets.Add(i % 2 == 0 ? new JObject() : new JObject { ["Name"] = "Sheet" + (i + 1), ["SheetId"] = 1000 + i });
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(new JArray(), sheets), stream);
+        watch.Stop();
+
+        var all = document.WorkbookPart!.Workbook!.Descendants<Sheet>().ToArray();
+        Assert.Equal(255, all.Select(s => s.Name!.Value!.ToLowerInvariant()).Distinct().Count());
+        Assert.Equal(255, all.Select(s => s.SheetId!.Value).Distinct().Count());
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
     }
 }
