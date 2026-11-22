@@ -21,6 +21,9 @@ public class JsonSpreedSheet
 
     private const double MaxDateSerial = 2958465; // 9999-12-31
 
+    /// <summary>The last Excel column (XFD): the schema rejects a column range above it.</summary>
+    private const uint MaxColumn = 16384;
+
     private const double FirstSafeDateSerial = 61; // 1900-03-01: the first date whose OLE serial equals the Excel serial
     private static readonly char[] InvalidSheetNameChars = { '[', ']', ':', '*', '?', '/', '\\' };
     private static readonly string[] ErrorLiterals = { "#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!" };
@@ -294,8 +297,8 @@ public class JsonSpreedSheet
         foreach (var jColumn in json.SelectToken("$.Workbook.Worksheet.Columns")?.Children() ?? Enumerable.Empty<JToken>())
         {
             // Excel columns start at 1; both bounds are required, whole numbers, and Min may not exceed Max
-            var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
-            var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+            var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+            var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
             if (min > max)
             {
                 throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
