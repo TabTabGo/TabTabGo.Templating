@@ -19,7 +19,7 @@ public sealed class JsonSpreedSheetCellTests
             ["Sheets"] = sheets ?? new JArray(new JObject { ["SheetId"] = 7, ["Name"] = "Report" }, new JObject()),
             ["Worksheet"] = new JObject
             {
-                ["Columns"] = columns ?? new JArray(new JObject(), new JObject { ["Min"] = 2, ["Max"] = 3, ["BestFit"] = true, ["Width"] = 9.5 }),
+                ["Columns"] = columns ?? new JArray(new JObject { ["Min"] = 1, ["Max"] = 1 }, new JObject { ["Min"] = 2, ["Max"] = 3, ["BestFit"] = true, ["Width"] = 9.5 }),
                 ["SheetData"] = new JObject { ["Rows"] = rows },
             },
         },
@@ -141,7 +141,7 @@ public sealed class JsonSpreedSheetCellTests
     }
 
     [Fact]
-    public void Sheets_AndColumns_TakeDefaultsForMissingMembers()
+    public void Sheets_AndColumns_TakeDefaultsForMissingOptionalMembers()
     {
         using var stream = new MemoryStream();
         new JsonSpreedSheet().CreateExcelDoc(stream, Workbook(new JArray()));

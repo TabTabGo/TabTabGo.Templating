@@ -293,12 +293,20 @@ public class JsonSpreedSheet
         var columns = new Columns();
         foreach (var jColumn in json.SelectToken("$.Workbook.Worksheet.Columns")?.Children() ?? Enumerable.Empty<JToken>())
         {
+            // Excel columns start at 1; both bounds are required, whole numbers, and Min may not exceed Max
+            var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+            var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+            if (min > max)
+            {
+                throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
+            }
+
             var column = new Column
             {
-                Min = UInt32Value.FromUInt32(ReadWholeNumber(jColumn["Min"], "Column Min", 0, uint.MaxValue) ?? 1),
-                Max = UInt32Value.FromUInt32(ReadWholeNumber(jColumn["Max"], "Column Max", 0, uint.MaxValue) ?? 1),
+                Min = UInt32Value.FromUInt32(min),
+                Max = UInt32Value.FromUInt32(max),
                 CustomWidth = false,
-                BestFit = BooleanValue.FromBoolean((bool?)jColumn["BestFit"] ?? false),
+                BestFit = BooleanValue.FromBoolean(ReadBoolean(jColumn["BestFit"], "Column BestFit")), // a missing BestFit is false
             };
 
             if (jColumn["Width"] != null)
