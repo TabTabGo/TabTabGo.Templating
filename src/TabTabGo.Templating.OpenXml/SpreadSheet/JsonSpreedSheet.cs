@@ -84,8 +84,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var columns = new Columns();
             foreach (JToken jColumn in jColumns)
             {
-                var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
-                var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+                var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+                var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
                 if (min > max)
                 {
                     throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
@@ -114,7 +114,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 columns.AppendChild(column);
             }
 
-            worksheetPart.Worksheet.AppendChild(columns);
+            if (columns.HasChildren)
+            {
+                worksheetPart.Worksheet.AppendChild(columns); // an empty <cols/> is schema-invalid
+            }
 
             Sheets sheets = workbookPart.Workbook.AppendChild(new Sheets());
             var jSheets = json.SelectToken("$.Workbook.Sheets");
@@ -465,6 +468,9 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         /// <summary>The largest SheetId the schema allows (the validator rejects anything above 65534).</summary>
         private const uint MaxSheetId = 65534;
+
+        /// <summary>The last Excel column (XFD): the schema rejects a column range above it.</summary>
+        private const uint MaxColumn = 16384;
 
         private static uint? ReadSheetId(JToken? token) => ReadWholeNumber(token, "SheetId", 1, MaxSheetId);
 

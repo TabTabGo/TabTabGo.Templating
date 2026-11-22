@@ -1011,4 +1011,42 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
 
         Assert.Throws<ArgumentException>(() => Cells(workbook));
     }
+
+    [Fact]
+    public void Q1_ColumnMinAndMax_UpTo16384_AreAccepted()
+    {
+        using var stream = new MemoryStream();
+        using var document = Write(WorkbookWithColumn(new JObject { ["Min"] = 1, ["Max"] = 16384 }), stream);
+
+        Assert.Equal(16384u, document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Column>().Single().Max!.Value);
+    }
+
+    [Theory]
+    [InlineData("Min", 16385)]
+    [InlineData("Max", 16385)]
+    [InlineData("Min", 4294967295)]
+    [InlineData("Max", 4294967295)]
+    public void Q1_ColumnMinOrMax_Above16384_IsRefused_AndWritesNoFile(string member, long value)
+    {
+        var column = new JObject { ["Min"] = 1, ["Max"] = 2 };
+        column[member] = value;
+        var path = Path.Combine(_base, "q1-" + Guid.NewGuid().ToString("N") + ".xlsx");
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(path, WorkbookWithColumn(column)));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void Q2_AnEmptyColumnsArray_WritesNoColsElement()
+    {
+        var workbook = Workbook(new JArray());
+        ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = new JArray();
+        using var stream = new MemoryStream();
+        using var document = Write(workbook, stream);
+
+        var xml = document.WorkbookPart!.WorksheetParts.First().Worksheet!.OuterXml;
+
+        Assert.DoesNotContain("<x:cols", xml.Replace("<cols", "<x:cols"));
+        Assert.Empty(document.WorkbookPart.WorksheetParts.First().Worksheet!.Descendants<Columns>());
+    }
 }
