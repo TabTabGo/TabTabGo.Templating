@@ -174,11 +174,14 @@ internal static class FilterCriteriaGuard
     /// <summary>The number of cached predicates (tests).</summary>
     internal static int CachedCount => Cache.Count;
 
+    /// <summary>Replaces the Dynamic LINQ parse (tests make it throw, to reach the real exception handling of <see cref="ParseAndCheck"/>).</summary>
+    internal static Func<string, LambdaExpression>? Parser { get; set; }
+
     private static Func<Hash, bool> ParseAndCheck(string criteria)
     {
         try
         {
-            var lambda = DynamicExpressionParser.ParseLambda(Config, typeof(Hash), typeof(bool), criteria);
+            var lambda = Parser?.Invoke(criteria) ?? DynamicExpressionParser.ParseLambda(Config, typeof(Hash), typeof(bool), criteria);
             var body = new Checker().Visit(lambda.Body)!;
             return Expression.Lambda<Func<Hash, bool>>(body, lambda.Parameters).Compile();
         }
