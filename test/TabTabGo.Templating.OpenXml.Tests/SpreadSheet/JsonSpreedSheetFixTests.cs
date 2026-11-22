@@ -904,7 +904,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         using var stream = new MemoryStream();
         using var document = Write(WorkbookWithColumn(column), stream);
 
-        var written = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Column>().Single();
+        var written = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Column>().Single();
 
         Assert.Equal(1u, written.Min!.Value);
         Assert.Equal(3u, written.Max!.Value);
@@ -933,8 +933,82 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         using var stream = new MemoryStream();
         using var document = Write(Workbook(rows), stream);
 
-        var collapsed = document.WorkbookPart!.WorksheetParts.First().Worksheet.Descendants<Row>().Select(r => r.Collapsed?.Value ?? false).ToArray();
+        var collapsed = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>().Select(r => r.Collapsed?.Value ?? false).ToArray();
 
         Assert.Equal(new[] { true, false, true, false, false }, collapsed);
+    }
+
+    // ---- round 9
+
+    private static Column WrittenColumn(JObject column)
+    {
+        using var stream = new MemoryStream();
+        using var document = Write(WorkbookWithColumn(column), stream);
+        return document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Column>().Single();
+    }
+
+    [Fact]
+    public void B3_Width_Null_Absent_Valid_Invalid()
+    {
+        var withNull = WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["Width"] = JValue.CreateNull() });
+        var absent = WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1 });
+        var valid = WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["Width"] = 12.5 });
+
+        Assert.Null(withNull.Width);
+        Assert.False(withNull.CustomWidth!.Value);
+        Assert.Null(absent.Width);
+        Assert.Equal(12.5, valid.Width!.Value);
+        Assert.Throws<ArgumentException>(() => WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["Width"] = "abc" }));
+    }
+
+    [Fact]
+    public void B3_BestFit_Null_Absent_Valid_Invalid()
+    {
+        Assert.False(WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = JValue.CreateNull() }).BestFit!.Value);
+        Assert.False(WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1 }).BestFit!.Value);
+        Assert.True(WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = true }).BestFit!.Value);
+        Assert.Throws<ArgumentException>(() => WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = "abc" }));
+    }
+
+    [Fact]
+    public void B3_Collapsed_Null_Absent_Valid_Invalid()
+    {
+        using var stream = new MemoryStream();
+        var rows = new JArray(new JObject { ["Collapsed"] = JValue.CreateNull() }, new JObject(), new JObject { ["Collapsed"] = true });
+        using var document = Write(Workbook(rows), stream);
+
+        var collapsed = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>().Select(r => r.Collapsed?.Value ?? false).ToArray();
+
+        Assert.Equal(new[] { false, false, true }, collapsed);
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(new JObject { ["Collapsed"] = "abc" }))));
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData(" 1 ", true)]
+    [InlineData("false", false)]
+    [InlineData("0", false)]
+    public void B1b_BestFit_AsText_IsAccepted_CaseInsensitively(string text, bool expected)
+    {
+        Assert.Equal(expected, WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = text }).BestFit!.Value);
+    }
+
+    [Theory]
+    [InlineData("yes")]
+    [InlineData("2")]
+    [InlineData("")]
+    public void B1b_BestFit_AsOtherText_IsRefused(string text)
+    {
+        Assert.Throws<ArgumentException>(() => WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = text }));
+    }
+
+    [Fact]
+    public void B4_MissingColumnsArray_IsAnArgumentException_NotANullReference()
+    {
+        var workbook = Workbook(new JArray());
+        ((JObject)workbook["Workbook"]!["Worksheet"]!).Remove("Columns");
+
+        Assert.Throws<ArgumentException>(() => Cells(workbook));
     }
 }

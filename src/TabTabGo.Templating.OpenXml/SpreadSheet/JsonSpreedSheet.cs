@@ -76,6 +76,11 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
             // Setting up columns
             var jColumns = json.SelectToken("$.Workbook.Worksheet.Columns");
+            if (jColumns == null)
+            {
+                throw new ArgumentException("$.Workbook.Worksheet.Columns is required (use an empty array for no columns).", "json");
+            }
+
             var columns = new Columns();
             foreach (JToken jColumn in jColumns)
             {
@@ -94,7 +99,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     BestFit = BooleanValue.FromBoolean(ReadBoolean(jColumn["BestFit"], "Column BestFit"))
                 };
 
-                if (jColumn["Width"] is JToken widthToken && widthToken.Type != JTokenType.Null)
+                if (jColumn["Width"] is JToken widthToken && widthToken.Type != JTokenType.Null && widthToken.Type != JTokenType.Undefined)
                 {
                     var width = ReadDouble(widthToken, "Column Width");
                     if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
@@ -469,7 +474,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         /// </summary>
         private static uint? ReadWholeNumber(JToken? token, string what, double min, double max)
         {
-            if (token == null || token.Type == JTokenType.Null)
+            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined) // a JSON null means "not given"
             {
                 return null;
             }
@@ -508,7 +513,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         private static bool ReadBoolean(JToken? token, string what)
         {
-            if (token == null || token.Type == JTokenType.Null)
+            if (token == null || token.Type == JTokenType.Null || token.Type == JTokenType.Undefined) // a JSON null means "not given"
             {
                 return false;
             }
