@@ -1267,4 +1267,32 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     {
         Assert.Throws<ArgumentException>(() => WrittenColumn(new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = text }));
     }
+
+    [Fact]
+    public void Q1_ColumnMinAndMax_UpTo16384_AreAccepted_AndValidatorClean()
+    {
+        var workbook = WorkbookWithColumn(new JObject { ["Min"] = 1, ["Max"] = 16384 });
+        using var stream = new MemoryStream();
+        using var document = Write(workbook, stream);
+
+        var column = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Column>().Single();
+
+        Assert.Equal(16384u, column.Max!.Value);
+        Assert.Empty(new DocumentFormat.OpenXml.Validation.OpenXmlValidator().Validate(document));
+    }
+
+    [Theory]
+    [InlineData("Min", 16385)]
+    [InlineData("Max", 16385)]
+    [InlineData("Min", 4294967295)]
+    [InlineData("Max", 4294967295)]
+    public void Q1_ColumnMinOrMax_Above16384_IsRefused_AndWritesNoFile(string member, long value)
+    {
+        var column = new JObject { ["Min"] = 1, ["Max"] = 2 };
+        column[member] = value;
+        var path = Path.Combine(_base, "q1-" + Guid.NewGuid().ToString("N") + ".xlsx");
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(path, WorkbookWithColumn(column)));
+        Assert.False(File.Exists(path));
+    }
 }
