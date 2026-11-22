@@ -1128,4 +1128,69 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", new DateTimeOffset(value)))))));
         }
     }
+
+    private const string HugeNumber = "1000000000000000000000000000000";
+
+    private static JObject WorkbookWithColumn(JObject column)
+    {
+        var workbook = Workbook(new JArray());
+        ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = new JArray(column);
+        return workbook;
+    }
+
+    [Theory]
+    [InlineData("Min", "0")]
+    [InlineData("Min", "-1")]
+    [InlineData("Min", "1.5")]
+    [InlineData("Min", "4294967296")]
+    [InlineData("Min", HugeNumber)]
+    [InlineData("Min", "\"abc\"")]
+    [InlineData("Max", "0")]
+    [InlineData("Max", "-1")]
+    [InlineData("Max", "2.5")]
+    [InlineData("Max", HugeNumber)]
+    [InlineData("BestFit", "\"abc\"")]
+    [InlineData("BestFit", "2")]
+    [InlineData("BestFit", "-1")]
+    [InlineData("BestFit", "0.5")]
+    [InlineData("BestFit", "1e400")]
+    [InlineData("BestFit", HugeNumber)]
+    [InlineData("BestFit", "\"\"")]
+    public void M43_M44_InvalidColumnValues_ThrowArgumentException_AndWriteNoFile(string member, string valueJson)
+    {
+        var column = new JObject { ["Min"] = 1, ["Max"] = 2, ["BestFit"] = true, ["Width"] = 10 };
+        column[member] = JToken.Parse(valueJson);
+        var path = Path.Combine(_base, "col-" + Guid.NewGuid().ToString("N") + ".xlsx");
+
+        Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(path, WorkbookWithColumn(column)));
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void M44_MinAndMaxAreRequired_AndMinMayNotExceedMax()
+    {
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject { ["Max"] = 2 })));
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject { ["Min"] = 1 })));
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject())));
+        Assert.Throws<ArgumentException>(() => Cells(WorkbookWithColumn(new JObject { ["Min"] = 3, ["Max"] = 2 })));
+    }
+
+    [Fact]
+    public void M43_BestFit_TrueFalseOneZero_AreAccepted_AndAMissingOneIsFalse()
+    {
+        var columns = new JArray(
+            new JObject { ["Min"] = 1, ["Max"] = 1, ["BestFit"] = true },
+            new JObject { ["Min"] = 2, ["Max"] = 2, ["BestFit"] = "false" },
+            new JObject { ["Min"] = 3, ["Max"] = 3, ["BestFit"] = 1 },
+            new JObject { ["Min"] = 4, ["Max"] = 4, ["BestFit"] = "0" },
+            new JObject { ["Min"] = 5, ["Max"] = 5 });
+        var workbook = Workbook(new JArray());
+        ((JObject)workbook["Workbook"]!["Worksheet"]!)["Columns"] = columns;
+        using var stream = new MemoryStream();
+        using var document = Write(workbook, stream);
+
+        var written = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Column>().Select(c => c.BestFit!.Value).ToArray();
+
+        Assert.Equal(new[] { true, false, true, false, false }, written);
+    }
 }
