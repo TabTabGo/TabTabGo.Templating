@@ -858,11 +858,13 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     }
 
     [Theory]
+    [InlineData("Min", "0")]
     [InlineData("Min", "-1")]
     [InlineData("Min", "1.5")]
     [InlineData("Min", "4294967296")]
     [InlineData("Min", HugeNumber)]
     [InlineData("Min", "\"abc\"")]
+    [InlineData("Max", "0")]
     [InlineData("Max", "-1")]
     [InlineData("Max", "2.5")]
     [InlineData("Max", HugeNumber)]

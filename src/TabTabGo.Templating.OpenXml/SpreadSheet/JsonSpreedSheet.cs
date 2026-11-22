@@ -79,8 +79,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var columns = new Columns();
             foreach (JToken jColumn in jColumns)
             {
-                var min = ReadWholeNumber(jColumn["Min"], "Column Min", 0, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
-                var max = ReadWholeNumber(jColumn["Max"], "Column Max", 0, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+                var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+                var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, uint.MaxValue) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
                 if (min > max)
                 {
                     throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
