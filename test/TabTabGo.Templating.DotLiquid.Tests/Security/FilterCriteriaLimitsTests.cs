@@ -886,4 +886,29 @@ public class FilterCriteriaLimitsTests
         Assert.True(runs > 20, $"only {runs} depths ran");
         Assert.Empty(failures);
     }
+
+    // ---- round 9: the real exception handling of ParseAndCheck, reached through the parser seam
+
+    [Fact]
+    public void ParseAndCheck_LetsOutOfMemoryPropagate_AndWrapsEveryOtherParserFailure()
+    {
+        try
+        {
+            FilterCriteriaGuard.ClearCache();
+            FilterCriteriaGuard.Parser = _ => throw new OutOfMemoryException("seam");
+            Assert.Throws<OutOfMemoryException>(() => CollectionFilters.Filter(Rows(), "it.k == \"seam-oom\""));
+            Assert.Throws<OutOfMemoryException>(() => FilterCriteriaGuard.ParseOnThisThread("it.k == \"seam-oom\"")); // the caller-thread path too
+
+            FilterCriteriaGuard.Parser = _ => throw new InvalidOperationException("seam failure");
+            var ex = Assert.Throws<ArgumentException>(() => CollectionFilters.Filter(Rows(), "it.k == \"seam-invalid\""));
+            Assert.Contains("seam failure", ex.Message);
+            Assert.Null(ex.InnerException);
+            Assert.Equal(0, FilterCriteriaGuard.CachedCount); // a failure is never cached
+        }
+        finally
+        {
+            FilterCriteriaGuard.Parser = null;
+            FilterCriteriaGuard.ClearCache();
+        }
+    }
 }

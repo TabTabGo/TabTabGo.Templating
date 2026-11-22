@@ -172,7 +172,7 @@ public class JsonSpreedSheet
     /// </summary>
     private static uint? ReadWholeNumber(JToken? token, string what, double min, double max)
     {
-        if (token == null || token.Type == JTokenType.Null)
+        if (token == null || token.Type is JTokenType.Null or JTokenType.Undefined) // a JSON null means "not given"
         {
             return null;
         }
@@ -214,7 +214,7 @@ public class JsonSpreedSheet
 
     private static bool ReadBoolean(JToken? token, string what)
     {
-        if (token == null || token.Type == JTokenType.Null)
+        if (token == null || token.Type is JTokenType.Null or JTokenType.Undefined) // a JSON null means "not given"
         {
             return false;
         }
@@ -309,12 +309,12 @@ public class JsonSpreedSheet
                 BestFit = BooleanValue.FromBoolean(ReadBoolean(jColumn["BestFit"], "Column BestFit")), // a missing BestFit is false
             };
 
-            if (jColumn["Width"] != null)
+            if (jColumn["Width"] is { } given && given.Type is not (JTokenType.Null or JTokenType.Undefined)) // a JSON null means "no width given"
             {
-                var width = ReadDouble(jColumn["Width"]!, "Column Width");
+                var width = ReadDouble(given, "Column Width");
                 if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
                 {
-                    throw new ArgumentException($"Column Width must be a number from 0 to 255 ({jColumn["Width"]}).", "json");
+                    throw new ArgumentException($"Column Width must be a number from 0 to 255 ({given}).", "json");
                 }
 
                 column.Width = DoubleValue.FromDouble(width);
