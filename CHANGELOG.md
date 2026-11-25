@@ -9,6 +9,8 @@ Target: net11.0 on SDK 11.0.100 (GA); Microsoft.Extensions 11.0.0 (GA). No API c
 the packed assemblies with the published 10.0.0 ones; package validation has no baseline (it cannot compare net10.0 with net11.0). `Microsoft.Extensions.Options`,
 `DependencyInjection.Abstractions` and `Configuration.Abstractions` are no longer package references: they ship in the net11.0 shared framework (NU1510).
 Lock files are committed and restore is always `--locked-mode`.
+Verified by running it: the packed packages were referenced from a plain `net11.0` console app (`Microsoft.NETCore.App` only, plus the consumer's own `Microsoft.Extensions.DependencyInjection`), which registered the options through `AddTabTabGoTemplating`, rendered a Liquid template and wrote a workbook; `Microsoft.Extensions.Options`, `DependencyInjection.Abstractions` and `Configuration.Abstractions` were resolved from the shared framework (they are not copied to the output), while `Configuration`, `.Binder` and `.Json` come with the package.
+ApiCompat script fixes: the reference set is the declared dependencies from the lock files (no stale packages from the shared cache, no `TabTabGo.*`), versions are compared as versions (10.0.10 above 10.0.9, a release above its preview), `--allow-missing-baseline` skips only the packages whose baseline is missing, and a transient nuget.org error is retried three times. The release order (v10.0.0 published before a v11 tag) is documented in the README.
 
 ## 10.0.0
 

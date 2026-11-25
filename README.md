@@ -71,7 +71,7 @@ Packages are published **only from tags**. There is no publish from `master` or 
 If a publish run fails part-way, do not re-run it: re-runs are refused. Fix the cause, bump the patch version and tag again.
 
 Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=11.0.0 -o out`. Package validation has no baseline on this line; the API surface is compared with the previous line by ApiCompat in assembly mode
-(`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, tool pinned in `.config/dotnet-tools.json`, `dotnet tool restore`).
+(`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, tool pinned in `.config/dotnet-tools.json`, `dotnet tool restore`). **Order of releases:** the ApiCompat step of `publish.yml` compares with the published `10.0.0` and fails the release when that version is not on nuget.org, so a v11 tag cannot be released before v10.0.0 is published (a transient nuget.org error is retried three times and then reported as such, not as a missing baseline). The reference assemblies are the declared dependencies from the committed lock files and the newest installed .NET reference pack, never the whole NuGet cache.
 
 ## Release notes 11.0.0
 
