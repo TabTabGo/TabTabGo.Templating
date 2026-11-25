@@ -39,19 +39,20 @@ public class EnhancedLocalFileSystem : IFileSystem
             throw new FileSystemException("Template not found", templatePath);
         }
 
-        var realPath = RealPathInsideRoot(fullPath);
-        if (realPath == null)
-        {
-            throw new FileSystemException("Illegal template path", templatePath);
-        }
-
         try
         {
+            // links are resolved and the folder boundary checked inside the try: the system exceptions of an unreadable directory or a link loop carry absolute paths
+            var realPath = TabTabGo.Templating.Internal.RealPath.ResolveInside(NormalizedRoot().TrimEnd(Path.DirectorySeparatorChar), fullPath);
+            if (realPath == null)
+            {
+                throw new FileSystemException("Illegal template path", templatePath);
+            }
+
             return Internal.GuardedRead.ReadText(realPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            // a dangling link, a file that vanished or one that cannot be read: the system message carries the absolute path, ours does not
+            // a dangling link, a link loop, an unreadable directory or file: the system message carries the absolute path, ours does not
             throw new FileSystemException("Template not found", templatePath);
         }
     }
@@ -88,72 +89,4 @@ public class EnhancedLocalFileSystem : IFileSystem
     private string NormalizedRoot() =>
         Path.GetFullPath(string.IsNullOrEmpty(Root) ? "." : Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
         + Path.DirectorySeparatorChar;
-
-    /// <summary>A symbolic link inside the root may point outside it (S-11): resolve every link and compare the real paths.</summary>
-    private string? RealPathInsideRoot(string fullPath)
-    {
-        var root = ResolveLinks(NormalizedRoot().TrimEnd(Path.DirectorySeparatorChar)) + Path.DirectorySeparatorChar;
-        var real = ResolveLinks(Path.GetFullPath(fullPath));
-        return real.StartsWith(root, PathComparison) ? real : null; // the caller opens this resolved path, not the one it was given
-    }
-
-    /// <summary>
-    /// The physical location of <paramref name="absolutePath"/>, resolved the way the operating system does it: one link at a time, each relative target applied
-    /// to the directory the link really sits in, <c>..</c> applied to the real parent. <c>ResolveLinkTarget(returnFinalTarget: true)</c> follows a chain of
-    /// relative links lexically, which disagrees with the OS as soon as a link points through another link.
-    /// </summary>
-    private static string ResolveLinks(string absolutePath)
-    {
-        var separators = new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar };
-        var volume = Path.GetPathRoot(absolutePath) ?? string.Empty;
-        var resolved = new List<string>();
-        var pending = new Stack<string>(absolutePath[volume.Length..].Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse());
-        var hops = 0;
-        while (pending.Count > 0)
-        {
-            var segment = pending.Pop();
-            if (segment == ".")
-            {
-                continue;
-            }
-
-            if (segment == "..")
-            {
-                if (resolved.Count > 0)
-                {
-                    resolved.RemoveAt(resolved.Count - 1);
-                }
-
-                continue;
-            }
-
-            resolved.Add(segment);
-            var current = Path.Combine(volume, Path.Combine(resolved.ToArray()));
-            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
-            if (info.LinkTarget is not { } target)
-            {
-                continue;
-            }
-
-            if (++hops > 32)
-            {
-                throw new FileSystemException("Illegal template path", "link depth");
-            }
-
-            resolved.RemoveAt(resolved.Count - 1);
-            if (Path.IsPathRooted(target))
-            {
-                volume = Path.GetPathRoot(target) ?? string.Empty;
-                resolved.Clear();
-                target = target[volume.Length..];
-            }
-
-            foreach (var part in target.Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse())
-            {
-                pending.Push(part);
-            }
-        }
-
-        return resolved.Count == 0 ? volume : Path.Combine(volume, Path.Combine(resolved.ToArray()));
-    }
 }

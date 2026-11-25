@@ -337,4 +337,106 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         Assert.Equal(b.Attributes, a.Attributes);
         Assert.Equal(b.Length, a.Length);
     }
+
+    // ---- T-1: the link resolution is inside the guarded block and every failure is path-free
+
+    private void AssertNoPathAnywhere(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            var text = e.Message + "\n" + string.Join("\n", e.ToString().Split('\n').Where(l => !l.TrimStart().StartsWith("at ", StringComparison.Ordinal)))
+                + "\n" + string.Join("\n", e.Data.Values.Cast<object?>().Select(v => v?.ToString()));
+            Assert.DoesNotContain(_root, text);
+            Assert.DoesNotContain(Path.GetFileName(_root), text);
+        }
+    }
+
+    [Fact]
+    public void T1_ALinkLoop_IsAPathFreeTemplateNotFound()
+    {
+        if (!TryLink(Path.Combine(_root, "_loop1.liquid"), "_loop2.liquid", directory: false) || !TryLink(Path.Combine(_root, "_loop2.liquid"), "_loop1.liquid", directory: false))
+        {
+            return;
+        }
+
+        var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "loop1"));
+
+        AssertNoPathAnywhere(ex);
+    }
+
+    [Fact]
+    public void T1_AChainOfMoreThan32Links_IsAPathFreeTemplateNotFound_AndAShortChainStillWorks()
+    {
+        for (var i = 0; i < 40; i++)
+        {
+            var target = i == 39 ? "_part.liquid" : "_hop" + (i + 1) + ".liquid";
+            if (!TryLink(Path.Combine(_root, "_hop" + i + ".liquid"), target, directory: false))
+            {
+                return;
+            }
+        }
+
+        var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "hop0"));
+        AssertNoPathAnywhere(ex);
+
+        Assert.Equal("root-part", Read(new EnhancedLocalFileSystem(_root), "hop30")); // 10 hops is fine
+    }
+
+    [Fact]
+    public void T1_AnUnreadableDirectoryInTheChain_IsAPathFreeTemplateNotFound()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        var locked = Path.Combine(_root, "locked");
+        Directory.CreateDirectory(locked);
+        File.WriteAllText(Path.Combine(locked, "_inner.liquid"), "x");
+        if (!TryLink(Path.Combine(_root, "_viadir.liquid"), Path.Combine("locked", "_inner.liquid"), directory: false))
+        {
+            return;
+        }
+
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "viadir"));
+            AssertNoPathAnywhere(ex);
+
+            var dangling = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "locked/inner"));
+            AssertNoPathAnywhere(dangling);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    [Fact]
+    public void T1_ADanglingLinkWhoseParentIsUnreadable_IsAPathFreeTemplateNotFound()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        var locked = Path.Combine(_root, "locked2");
+        Directory.CreateDirectory(locked);
+        if (!TryLink(Path.Combine(locked, "_gone.liquid"), "nowhere.liquid", directory: false))
+        {
+            return;
+        }
+
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(_root), "locked2/gone"));
+            AssertNoPathAnywhere(ex);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
 }

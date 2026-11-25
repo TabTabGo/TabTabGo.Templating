@@ -1295,4 +1295,63 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(path, WorkbookWithColumn(column)));
         Assert.False(File.Exists(path));
     }
+
+    // ---- T-1: the stylesheet loader shares the link resolution with the include loader and fails the same way, path-free
+
+    [Fact]
+    public void T1_LinkLoop_AndAChainOfMoreThan32Links_AreAPathFreeNotFound()
+    {
+        var root = Path.Combine(_base, "root");
+        if (!TryLink(Path.Combine(root, "loop1.xml"), "loop2.xml", directory: false) || !TryLink(Path.Combine(root, "loop2.xml"), "loop1.xml", directory: false))
+        {
+            return;
+        }
+
+        File.WriteAllText(Path.Combine(root, "end.xml"), StyleXml);
+        for (var i = 0; i < 40; i++)
+        {
+            if (!TryLink(Path.Combine(root, "hop" + i + ".xml"), i == 39 ? "end.xml" : "hop" + (i + 1) + ".xml", directory: false))
+            {
+                return;
+            }
+        }
+
+        foreach (var name in new[] { "loop1.xml", "hop0.xml" })
+        {
+            var ex = StylesheetFailure(name);
+
+            Assert.IsType<FileNotFoundException>(ex);
+            AssertPathFree(ex);
+        }
+    }
+
+    [Fact]
+    public void T1_AnUnreadableDirectoryInTheChain_IsAPathFreeNotFound()
+    {
+        if (OperatingSystem.IsWindows() || Environment.UserName == "root")
+        {
+            return;
+        }
+
+        var locked = Path.Combine(_base, "root", "locked");
+        Directory.CreateDirectory(locked);
+        File.WriteAllText(Path.Combine(locked, "inner.xml"), StyleXml);
+        if (!TryLink(Path.Combine(_base, "root", "viadir.xml"), Path.Combine("locked", "inner.xml"), directory: false))
+        {
+            return;
+        }
+
+        File.SetUnixFileMode(locked, UnixFileMode.None);
+        try
+        {
+            var ex = StylesheetFailure("viadir.xml");
+
+            Assert.IsType<FileNotFoundException>(ex);
+            AssertPathFree(ex);
+        }
+        finally
+        {
+            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
 }
