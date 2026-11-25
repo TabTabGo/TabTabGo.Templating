@@ -357,7 +357,6 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     [InlineData("Boolean", "")]
     [InlineData("Date", "")]
     [InlineData("Date", null)]
-    [InlineData("Date", "not a date")]
     public void B1_EmptyNumberBooleanOrDate_IsAnEmptyCell_WithItsStyle(string type, string? value)
     {
         var cell = Assert.Single(Cells(Workbook(new JArray(Row(new JObject { ["DataType"] = type, ["CellValue"] = value == null ? JValue.CreateNull() : value })))));
@@ -1048,5 +1047,81 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
 
         Assert.DoesNotContain("<x:cols", xml.Replace("<cols", "<x:cols"));
         Assert.Empty(document.WorkbookPart.WorksheetParts.First().Worksheet!.Descendants<Columns>());
+    }
+
+    // ---- T-3
+
+    [Fact]
+    public void T3_NullStyleIndex_IsNotGiven_SoTheFormatLookupStaysActive()
+    {
+        var writer = WriterWithStylesheet(4, out var stylesheets);
+        var styleMap = new JArray(new JObject { ["Key"] = "Currency", ["SIndex"] = 3 });
+        var cell = new JObject { ["CellValue"] = "x", ["StyleIndex"] = JValue.CreateNull(), ["Format"] = "Currency" };
+
+        var written = Assert.Single(Cells(Workbook(new JArray(Row(cell)), styleMap: styleMap, stylesheets: stylesheets), writer));
+
+        Assert.Equal(3u, written.StyleIndex!.Value);
+    }
+
+    [Fact]
+    public void T3_NullSAlternativeIndex_UsesSIndex_AndAGivenOneStillAlternates()
+    {
+        var writer = WriterWithStylesheet(5, out var stylesheets);
+        var withNull = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 2, ["SAlternativeIndex"] = JValue.CreateNull() });
+        var withValue = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 2, ["SAlternativeIndex"] = 4 });
+        JArray Rows() => new(Row(Cell(null, "h", "X")), Row(Cell(null, "a", "X")), Row(Cell(null, "b", "X")));
+
+        using (var stream = new MemoryStream())
+        {
+            using var document = Write(Workbook(Rows(), styleMap: withNull, stylesheets: stylesheets), stream, writer);
+            var styles = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>().Select(r => r.Elements<Cell>().Single().StyleIndex!.Value).ToArray();
+            Assert.Equal(new[] { 2u, 2u, 2u }, styles);
+        }
+
+        using (var stream = new MemoryStream())
+        {
+            using var document = Write(Workbook(Rows(), styleMap: withValue, stylesheets: stylesheets), stream, writer);
+            var styles = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>().Select(r => r.Elements<Cell>().Single().StyleIndex!.Value).ToArray();
+            Assert.Equal(new[] { 2u, 2u, 4u }, styles);
+        }
+    }
+
+    [Fact]
+    public void T3_ExplicitStyleIndex_StillWins_AndABadOneStillThrows()
+    {
+        var writer = WriterWithStylesheet(4, out var stylesheets);
+        var good = new JObject { ["CellValue"] = "x", ["StyleIndex"] = 1 };
+        var bad = new JObject { ["CellValue"] = "x", ["StyleIndex"] = 9 };
+
+        Assert.Equal(1u, Assert.Single(Cells(Workbook(new JArray(Row(good)), stylesheets: stylesheets), writer)).StyleIndex!.Value);
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(bad)), stylesheets: stylesheets), writer));
+    }
+
+    [Fact]
+    public void T3_MissingOrMisshapenRows_IsAnArgumentException()
+    {
+        var missing = Workbook(new JArray());
+        ((JObject)missing["Workbook"]!["Worksheet"]!["SheetData"]!).Remove("Rows");
+        var notAnArray = Workbook(new JArray());
+        ((JObject)notAnArray["Workbook"]!["Worksheet"]!["SheetData"]!)["Rows"] = "abc";
+        var noSheetData = Workbook(new JArray());
+        ((JObject)noSheetData["Workbook"]!["Worksheet"]!).Remove("SheetData");
+
+        Assert.Throws<ArgumentException>(() => Cells(missing));
+        Assert.Throws<ArgumentException>(() => Cells(notAnArray));
+        Assert.Throws<ArgumentException>(() => Cells(noSheetData));
+
+        using var stream = new MemoryStream();
+        using var document = Write(Workbook(new JArray()), stream); // an empty Rows array is still fine
+        Assert.Empty(document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>());
+    }
+
+    [Theory]
+    [InlineData("not a date")]
+    [InlineData("2024-13-45")]
+    [InlineData("abc")]
+    public void T3_UnparseableDateText_IsAnArgumentException(string text)
+    {
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(Cell("Date", text))))));
     }
 }

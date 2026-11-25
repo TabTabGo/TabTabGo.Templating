@@ -45,6 +45,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
         public void CreateExcelDoc(Stream stream, JObject json)
         {
             var sheetIds = ValidateSheets(json.SelectToken("$.Workbook.Sheets"));
+            if (!(json.SelectToken("$.Workbook.Worksheet.SheetData.Rows") is JArray))
+            {
+                throw new ArgumentException("$.Workbook.Worksheet.SheetData.Rows is required and must be an array (use an empty array for no rows).", "json");
+            }
 
             using SpreadsheetDocument
                 document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
@@ -177,9 +181,15 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var cell = new Cell();
             if (dataType == CellValues.Date)
             {
-                // an empty or unparseable date is an empty cell: <c t="n"><v/></c> is not valid
-                if (!string.IsNullOrEmpty(jCell["CellValue"]?.ToString()) && DateTime.TryParse(jCell["CellValue"]?.ToString(), out var date))
+                // an empty date is an empty cell (<c t="n"><v/></c> is not valid); text that is not a date is an error, like a bad Number or Boolean
+                var dateText = jCell["CellValue"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(dateText))
                 {
+                    if (!DateTime.TryParse(dateText, out var date))
+                    {
+                        throw new ArgumentException($"A Date cell must hold a date ({dateText}).", "json");
+                    }
+
                     cell.CellValue = new CellValue(date.ToUniversalTime().ToString());
                     cell.DataType = new EnumValue<CellValues>(CellValues.Number);
                 }
@@ -343,9 +353,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         private UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative, uint styleCount)
         {
-            if (jCell["StyleIndex"] != null)
+            var explicitToken = jCell["StyleIndex"];
+            if (explicitToken != null && explicitToken.Type != JTokenType.Null && explicitToken.Type != JTokenType.Undefined) // a JSON null means "not given": the Format lookup stays active
             {
-                var explicitIndex = ReadWholeNumber(jCell["StyleIndex"], "StyleIndex", 0, uint.MaxValue) ?? 0;
+                var explicitIndex = ReadWholeNumber(explicitToken, "StyleIndex", 0, uint.MaxValue) ?? 0;
                 if (explicitIndex >= Math.Max(styleCount, 1))
                 {
                     throw new ArgumentException($"StyleIndex {explicitIndex} is outside the stylesheet's {styleCount} cell formats.", "json");
@@ -369,8 +380,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
             if (map != null)
             {
-                var mapped = useAlternative && map["SAlternativeIndex"] != null
-                    ? ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0
+                var alternativeToken = map["SAlternativeIndex"];
+                var hasAlternative = alternativeToken != null && alternativeToken.Type != JTokenType.Null && alternativeToken.Type != JTokenType.Undefined; // null means "not given"
+                var mapped = useAlternative && hasAlternative
+                    ? ReadWholeNumber(alternativeToken, "SAlternativeIndex", 0, uint.MaxValue) ?? 0
                     : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
                 if (mapped >= Math.Max(styleCount, 1))
                 {
