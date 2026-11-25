@@ -549,7 +549,7 @@ public class JsonSpreedSheet
         try
         {
             // a symbolic link inside the root may point outside it: compare the real paths
-            var real = RealPath.ResolveInside(root, full)
+            var real = TabTabGo.Templating.Internal.RealPath.ResolveInside(root, full)
                 ?? throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
 
             var settings = new System.Xml.XmlReaderSettings
