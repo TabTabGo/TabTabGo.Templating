@@ -58,6 +58,8 @@ application base directory, which is also the default; `TemplatesPath` is never 
 
 **Known limitation: the template and stylesheet folders must not be writable by untrusted parties.** .NET cannot tell a named pipe or a device file from an empty regular file before opening it (all report `FileAttributes.Normal` and length 0), and a plain open of a named pipe blocks the render thread, so no managed check can refuse one; no native call is made because none is portable to musl, macOS and Windows alike. Someone who can create a pipe in those folders can already replace the templates themselves. Files are read through a byte-counting cap of 16 MB.
 
+The `.xlsx` template file given to `Render(path, ...)` is trusted input like the template folder: it is opened by the Open XML SDK without a size cap, so keep it as closed as the folder (stylesheets and includes are capped at 16 MB).
+
 ## Limitations
 
 Tables placed side by side on the same rows are not supported. Formulas, conditional formats, data validations and defined names that point *below* an expanded table keep their old
