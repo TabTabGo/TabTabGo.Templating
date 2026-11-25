@@ -15,7 +15,12 @@ def find_vulnerabilities(node, path: str = "") -> list[str]:
     if isinstance(node, dict):
         vulnerabilities = node.get("vulnerabilities")
         if vulnerabilities:
-            advisories = ", ".join(v.get("advisoryurl", "?") + " (" + v.get("severity", "?") + ")" for v in vulnerabilities)
+            # an entry that is not an object cannot be read: that is a finding, never a pass (fail closed)
+            entries = vulnerabilities if isinstance(vulnerabilities, list) else [vulnerabilities]
+            advisories = ", ".join(
+                f"{v.get('advisoryurl', '?')} ({v.get('severity', '?')})" if isinstance(v, dict) else f"unreadable advisory entry {v!r}"
+                for v in entries
+            )
             findings.append(f"{node.get('id', '?')} {node.get('resolvedVersion', '?')}: {advisories}")
         for value in node.values():
             findings.extend(find_vulnerabilities(value, path))
@@ -53,16 +58,32 @@ def audit_problems(report) -> list[str]:
     return reasons
 
 
+REPORT_KEYS = ("version", "parameters", "sources", "projects", "problems")
+
+
+def extract_report(raw: str):
+    """The report object inside the command output: the first `{` that starts a JSON object with a report key.
+
+    A warning line before the report may contain a `{` of its own, so every `{` is tried in turn; nothing parseable returns None (the caller fails closed).
+    """
+    decoder = json.JSONDecoder()
+    position = raw.find("{")
+    while position >= 0:
+        try:
+            candidate, _ = decoder.raw_decode(raw, position)
+        except json.JSONDecodeError:
+            candidate = None
+        if isinstance(candidate, dict) and any(key in candidate for key in REPORT_KEYS):
+            return candidate
+        position = raw.find("{", position + 1)
+    return None
+
+
 def main() -> int:
     raw = sys.stdin.read()
-    start = raw.find("{")
-    if start < 0:
-        print("::error::no JSON in `dotnet list package` output", file=sys.stderr)
-        return 2
-    try:
-        report = json.loads(raw[start:])
-    except json.JSONDecodeError as error:
-        print(f"::error::unreadable `dotnet list package` output: {error}", file=sys.stderr)
+    report = extract_report(raw)
+    if report is None:
+        print("::error::no readable JSON report in `dotnet list package` output", file=sys.stderr)
         return 2
     reasons = audit_problems(report)
     if reasons:
