@@ -439,4 +439,66 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
             File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
     }
+
+    // ---- M-10: the root may be relative, "./", up-and-down, or empty (the current directory)
+
+    [Fact]
+    public void M10_RelativeRoots_ResolveLikeAbsoluteOnes()
+    {
+        var cwd = Environment.CurrentDirectory;
+        var relative = Path.GetRelativePath(cwd, _root);
+        var roots = new[]
+        {
+            relative,
+            "./" + relative,
+            Path.Combine(relative, "..", Path.GetFileName(_root)), // up and back down
+            Path.Combine(relative, "sub", ".."),
+            _root,
+        };
+
+        foreach (var root in roots)
+        {
+            Assert.Equal("root-part", Read(new EnhancedLocalFileSystem(root), "part"));
+            Assert.Equal("inner-part", Read(new EnhancedLocalFileSystem(root), "sub/inner"));
+        }
+    }
+
+    [Fact]
+    public void M10_AnEmptyRoot_IsTheCurrentDirectory()
+    {
+        var name = "ttgrel" + Guid.NewGuid().ToString("N");
+        var file = Path.Combine(Environment.CurrentDirectory, "_" + name + ".liquid");
+        File.WriteAllText(file, "from-cwd");
+        try
+        {
+            Assert.Equal("from-cwd", Read(new EnhancedLocalFileSystem(string.Empty), name));
+            Assert.Equal("from-cwd", Read(new EnhancedLocalFileSystem("."), name));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void M10_ARelativeRoot_StillRefusesAPartialOutsideIt()
+    {
+        var relative = Path.GetRelativePath(Environment.CurrentDirectory, _root);
+        var outside = Path.Combine(Path.GetDirectoryName(_root)!, "outside-" + Guid.NewGuid().ToString("N") + ".liquid");
+        File.WriteAllText(outside, "SECRET");
+        try
+        {
+            if (!TryLink(Path.Combine(_root, "_out.liquid"), Path.Combine("..", Path.GetFileName(outside)), directory: false))
+            {
+                Assert.Skip("this platform or account cannot create symbolic links");
+            }
+
+            var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(relative), "out"));
+            Assert.DoesNotContain("SECRET", ex.Message);
+        }
+        finally
+        {
+            File.Delete(outside);
+        }
+    }
 }

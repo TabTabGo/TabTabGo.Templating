@@ -18,6 +18,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="TabTabGo.Templating.Dotliquid" />
     <InternalsVisibleTo Include="TabTabGo.Templating.OpenXml" />
+    <InternalsVisibleTo Include="TabTabGo.Templating.Tests" />
   </ItemGroup>
 
   <ItemGroup>

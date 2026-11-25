@@ -915,24 +915,6 @@ public class FilterCriteriaLimitsTests
     // ---- T-2: eviction and the cost of distinct criteria
 
     [Fact]
-    public void T2_ThousandDistinctCriteria_Throughput_IsLogged()
-    {
-        FilterCriteriaGuard.ClearCache();
-        var rows = Rows();
-        var watch = Stopwatch.StartNew();
-        for (var i = 0; i < 1000; i++)
-        {
-            CollectionFilters.Filter(rows, "it[\"k\"].ToString() = \"abc" + i + "\"");
-        }
-
-        watch.Stop();
-        var perSecond = 1000 / watch.Elapsed.TotalSeconds;
-        LogStack($"T2 throughput: 1000 distinct it[\"k\"] criteria in {watch.Elapsed.TotalMilliseconds:F0} ms = {perSecond:F0} calls/s");
-        File.AppendAllText(Path.Combine(Path.GetTempPath(), "ttg-t2-throughput.txt"), $"{perSecond:F0} calls/s ({watch.Elapsed.TotalMilliseconds:F0} ms)\n");
-        Assert.True(perSecond > 0);
-    }
-
-    [Fact]
     public void T2_HotEntries_SurviveAFloodOfDistinctCriteria()
     {
         FilterCriteriaGuard.ClearCache();
