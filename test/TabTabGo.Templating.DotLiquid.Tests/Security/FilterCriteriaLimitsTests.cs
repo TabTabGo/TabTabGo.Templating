@@ -633,7 +633,7 @@ public class FilterCriteriaLimitsTests
     }
 
     [Theory]
-    [InlineData("it[\"k\"] == null", true)]
+    [InlineData("it[\"k\"] == null", false)]
     [InlineData("{1}", false)]
     [InlineData("x => x", false)]
     [InlineData("new(1)", false)]
@@ -642,7 +642,7 @@ public class FilterCriteriaLimitsTests
     [InlineData("it.renew == null", true)]
     [InlineData("it.newer == null", true)]
     [InlineData("it.k == \"a\"", true)]
-    public void F1_Eligibility_RejectsBracesNewAndLambdas_ButNotBracketsOrWordsContainingNew(string expression, bool eligible)
+    public void F1_Eligibility_RejectsBracketsBracesNewAndLambdas_ButNotWordsContainingNew(string expression, bool eligible)
     {
         Assert.Equal(eligible, FilterCriteriaGuard.IsShallow(expression, 0));
     }
@@ -864,9 +864,6 @@ public class FilterCriteriaLimitsTests
         yield return new object[] { Repeat("Math.Abs(", 8) + "1" + Repeat(")", 8) };
         yield return new object[] { Repeat("iif(true,", 8) + "1" + Repeat(",1)", 8) };
         yield return new object[] { "((((((((1))))))))" };
-        yield return new object[] { Repeat("it[", 8) + "\"a\"" + Repeat("]", 8) + " == null" };
-        yield return new object[] { Repeat("\"a\"[", 8) + "0" + Repeat("]", 8) + " == 'a'" };
-        yield return new object[] { "it[\"k\"].ToString() = \"abc\" or it[\"id\"].ToString() = \"2\"" };
     }
 
     [Theory]
