@@ -50,7 +50,17 @@ internal static class FilterCriteriaGuard
 
     private const int MaxCachedPredicates = 256;
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<Hash, bool>> Cache = new(StringComparer.Ordinal);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CacheEntry> Cache = new(StringComparer.Ordinal);
+
+    private static long _clock;
+
+    /// <summary>A cached predicate and when it was last used (a logical clock), so the least recently used one can be evicted alone.</summary>
+    private sealed class CacheEntry(Func<Hash, bool> predicate)
+    {
+        public Func<Hash, bool> Predicate { get; } = predicate;
+
+        public long LastUsed;
+    }
 
     private const int ParseStackBytes = 16 * 1024 * 1024; // reserved, committed as used; the parse and the walk recurse once per nesting level
 
@@ -89,7 +99,8 @@ internal static class FilterCriteriaGuard
         ArgumentNullException.ThrowIfNull(criteria);
         if (Cache.TryGetValue(criteria, out var cached))
         {
-            return cached; // only guard-approved predicates are ever stored, and a predicate holds no per-render state
+            Volatile.Write(ref cached.LastUsed, Interlocked.Increment(ref _clock)); // lock-free: a hit only stamps the entry
+            return cached.Predicate; // only guard-approved predicates are ever stored, and a predicate holds no per-render state
         }
 
         if (criteria.Length > MaxCriteriaCharacters)
@@ -104,13 +115,29 @@ internal static class FilterCriteriaGuard
 
         lock (CacheLock)
         {
-            // the miss path only: reads stay lock-free. Clear on full: the cache is a bound, not a policy.
+            // the miss path only: reads stay lock-free. When full, only the least recently used entry goes: a flood of distinct criteria (an id inside the text) pushes out its own
+            // earlier entries, not the hot ones of every other template.
             if (Cache.Count >= MaxCachedPredicates && !Cache.ContainsKey(criteria))
             {
-                Cache.Clear();
+                string? oldestText = null;
+                var oldestStamp = long.MaxValue;
+                foreach (var (text, entry) in Cache)
+                {
+                    var stamp = Volatile.Read(ref entry.LastUsed);
+                    if (stamp < oldestStamp)
+                    {
+                        oldestStamp = stamp;
+                        oldestText = text;
+                    }
+                }
+
+                if (oldestText != null)
+                {
+                    Cache.TryRemove(oldestText, out _);
+                }
             }
 
-            Cache[criteria] = predicate;
+            Cache[criteria] = new CacheEntry(predicate) { LastUsed = Interlocked.Increment(ref _clock) };
         }
 
         return predicate;
@@ -121,7 +148,7 @@ internal static class FilterCriteriaGuard
     /// <param name="nesting">The nesting <see cref="CheckNesting"/> measured.</param>
     internal static bool IsShallow(string criteria, int nesting)
     {
-        if (criteria.Length > ShallowCharacters || nesting > ShallowNesting || criteria.Contains('[') || criteria.Contains('{') || criteria.Contains("=>", StringComparison.Ordinal))
+        if (criteria.Length > ShallowCharacters || nesting > ShallowNesting || criteria.Contains('{') || criteria.Contains("=>", StringComparison.Ordinal))
         {
             return false;
         }

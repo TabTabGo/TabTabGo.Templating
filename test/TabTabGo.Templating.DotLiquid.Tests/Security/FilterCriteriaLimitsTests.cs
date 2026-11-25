@@ -633,7 +633,7 @@ public class FilterCriteriaLimitsTests
     }
 
     [Theory]
-    [InlineData("it[\"k\"] == null", false)]
+    [InlineData("it[\"k\"] == null", true)]
     [InlineData("{1}", false)]
     [InlineData("x => x", false)]
     [InlineData("new(1)", false)]
@@ -642,7 +642,7 @@ public class FilterCriteriaLimitsTests
     [InlineData("it.renew == null", true)]
     [InlineData("it.newer == null", true)]
     [InlineData("it.k == \"a\"", true)]
-    public void F1_Eligibility_RejectsBracketsBracesNewAndLambdas_ButNotWordsContainingNew(string expression, bool eligible)
+    public void F1_Eligibility_RejectsBracesNewAndLambdas_ButNotBracketsOrWordsContainingNew(string expression, bool eligible)
     {
         Assert.Equal(eligible, FilterCriteriaGuard.IsShallow(expression, 0));
     }
@@ -864,6 +864,9 @@ public class FilterCriteriaLimitsTests
         yield return new object[] { Repeat("Math.Abs(", 8) + "1" + Repeat(")", 8) };
         yield return new object[] { Repeat("iif(true,", 8) + "1" + Repeat(",1)", 8) };
         yield return new object[] { "((((((((1))))))))" };
+        yield return new object[] { Repeat("it[", 8) + "\"a\"" + Repeat("]", 8) + " == null" };
+        yield return new object[] { Repeat("\"a\"[", 8) + "0" + Repeat("]", 8) + " == 'a'" };
+        yield return new object[] { "it[\"k\"].ToString() = \"abc\" or it[\"id\"].ToString() = \"2\"" };
     }
 
     [Theory]
@@ -910,5 +913,50 @@ public class FilterCriteriaLimitsTests
             FilterCriteriaGuard.Parser = null;
             FilterCriteriaGuard.ClearCache();
         }
+    }
+
+    // ---- T-2: eviction and the cost of distinct criteria
+
+    [Fact]
+    public void T2_ThousandDistinctCriteria_Throughput_IsLogged()
+    {
+        FilterCriteriaGuard.ClearCache();
+        var rows = Rows();
+        var watch = Stopwatch.StartNew();
+        for (var i = 0; i < 1000; i++)
+        {
+            CollectionFilters.Filter(rows, "it[\"k\"].ToString() = \"abc" + i + "\"");
+        }
+
+        watch.Stop();
+        var perSecond = 1000 / watch.Elapsed.TotalSeconds;
+        LogStack($"T2 throughput: 1000 distinct it[\"k\"] criteria in {watch.Elapsed.TotalMilliseconds:F0} ms = {perSecond:F0} calls/s");
+        File.AppendAllText(Path.Combine(Path.GetTempPath(), "ttg-t2-throughput.txt"), $"{perSecond:F0} calls/s ({watch.Elapsed.TotalMilliseconds:F0} ms)\n");
+        Assert.True(perSecond > 0);
+    }
+
+    [Fact]
+    public void T2_HotEntries_SurviveAFloodOfDistinctCriteria()
+    {
+        FilterCriteriaGuard.ClearCache();
+        var rows = Rows();
+        string[] hot = { "it[\"k\"].ToString() = \"hot1\"", "it[\"k\"].ToString() = \"hot2\"", "it[\"k\"].ToString() = \"hot3\"" };
+        var compiled = hot.Select(FilterCriteriaGuard.Compile).ToArray();
+
+        for (var i = 0; i < 1000; i++)
+        {
+            CollectionFilters.Filter(rows, "it[\"k\"].ToString() = \"flood" + i + "\"");
+            foreach (var criteria in hot)
+            {
+                FilterCriteriaGuard.Compile(criteria); // the hot entries are used all the time
+            }
+        }
+
+        for (var h = 0; h < hot.Length; h++)
+        {
+            Assert.Same(compiled[h], FilterCriteriaGuard.Compile(hot[h])); // never evicted: not recompiled
+        }
+
+        Assert.InRange(FilterCriteriaGuard.CachedCount, 1, 256);
     }
 }
