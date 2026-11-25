@@ -42,7 +42,7 @@ public class EnhancedLocalFileSystem : IFileSystem
         try
         {
             // links are resolved and the folder boundary checked inside the try: the system exceptions of an unreadable directory or a link loop carry absolute paths
-            var realPath = TabTabGo.Templating.Internal.RealPath.ResolveInside(NormalizedRoot().TrimEnd(Path.DirectorySeparatorChar), fullPath);
+            var realPath = TabTabGo.Templating.Internal.RealPath.ResolveInside(NormalizedRoot().TrimEnd(Path.DirectorySeparatorChar), Path.GetFullPath(fullPath));
             if (realPath == null)
             {
                 throw new FileSystemException("Illegal template path", templatePath);

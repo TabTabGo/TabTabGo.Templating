@@ -1411,4 +1411,95 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         AssertNoSentinel(() => Workbook(new JArray(new JObject { ["Collapsed"] = Sentinel })));
         AssertNoSentinel(() => Workbook(new JArray(new JObject { ["Collapsed"] = long.Parse(NumericSentinel) })));
     }
+
+    // ---- M-11: a JSON null is "not given" for StyleIndex, SAlternativeIndex and Format (the style lookup stays active)
+
+    [Fact]
+    public void T3_NullStyleIndex_IsNotGiven_SoTheFormatLookupStaysActive()
+    {
+        var writer = WriterWithStylesheet(4, out var stylesheets);
+        var styleMap = new JArray(new JObject { ["Key"] = "Currency", ["SIndex"] = 3 });
+        var cell = new JObject { ["CellValue"] = "x", ["StyleIndex"] = JValue.CreateNull(), ["Format"] = "Currency" };
+
+        var written = Assert.Single(Cells(Workbook(new JArray(Row(cell)), styleMap: styleMap, stylesheets: stylesheets), writer));
+
+        Assert.Equal(3u, written.StyleIndex!.Value);
+    }
+
+    [Fact]
+    public void T3_NullSAlternativeIndex_UsesSIndex_AndAGivenOneStillAlternates()
+    {
+        var writer = WriterWithStylesheet(5, out var stylesheets);
+        var withNull = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 2, ["SAlternativeIndex"] = JValue.CreateNull() });
+        var withValue = new JArray(new JObject { ["Key"] = "X", ["SIndex"] = 2, ["SAlternativeIndex"] = 4 });
+        JArray Rows() => new(Row(Cell(null, "h", "X")), Row(Cell(null, "a", "X")), Row(Cell(null, "b", "X")));
+
+        using (var stream = new MemoryStream())
+        {
+            using var document = Write(Workbook(Rows(), styleMap: withNull, stylesheets: stylesheets), stream, writer);
+            var styles = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>().Select(r => r.Elements<Cell>().Single().StyleIndex!.Value).ToArray();
+            Assert.Equal(new[] { 2u, 2u, 2u }, styles);
+        }
+
+        using (var stream = new MemoryStream())
+        {
+            using var document = Write(Workbook(Rows(), styleMap: withValue, stylesheets: stylesheets), stream, writer);
+            var styles = document.WorkbookPart!.WorksheetParts.First().Worksheet!.Descendants<Row>().Select(r => r.Elements<Cell>().Single().StyleIndex!.Value).ToArray();
+            Assert.Equal(new[] { 2u, 2u, 4u }, styles);
+        }
+    }
+
+    [Fact]
+    public void T3_ExplicitStyleIndex_StillWins_AndABadOneStillThrows()
+    {
+        var writer = WriterWithStylesheet(4, out var stylesheets);
+        var good = new JObject { ["CellValue"] = "x", ["StyleIndex"] = 1 };
+        var bad = new JObject { ["CellValue"] = "x", ["StyleIndex"] = 9 };
+
+        Assert.Equal(1u, Assert.Single(Cells(Workbook(new JArray(Row(good)), stylesheets: stylesheets), writer)).StyleIndex!.Value);
+        Assert.Throws<ArgumentException>(() => Cells(Workbook(new JArray(Row(bad)), stylesheets: stylesheets), writer));
+    }
+
+    [Fact]
+    public void M11_NullFormat_UsesTheNormalStyle_AndNullSIndexIsStyleZero()
+    {
+        var writer = WriterWithStylesheet(4, out var stylesheets);
+        var styleMap = new JArray(new JObject { ["Key"] = "Normal", ["SIndex"] = 2 }, new JObject { ["Key"] = "Plain", ["SIndex"] = JValue.CreateNull() });
+        var nullFormat = new JObject { ["CellValue"] = "x", ["Format"] = JValue.CreateNull() };
+        var nullIndex = new JObject { ["CellValue"] = "x", ["Format"] = "Plain" };
+
+        Assert.Equal(2u, Assert.Single(Cells(Workbook(new JArray(Row(nullFormat)), styleMap: styleMap, stylesheets: stylesheets), writer)).StyleIndex!.Value);
+        Assert.Equal(0u, Assert.Single(Cells(Workbook(new JArray(Row(nullIndex)), styleMap: styleMap, stylesheets: stylesheets), writer)).StyleIndex!.Value);
+    }
+
+    [Fact]
+    public void M10_RelativeStylesheetRoots_AreResolvedAgainstTheApplicationBaseDirectory()
+    {
+        var folder = "ttgstyles" + Guid.NewGuid().ToString("N");
+        var absolute = Path.Combine(AppContext.BaseDirectory, folder);
+        Directory.CreateDirectory(absolute);
+        File.WriteAllText(Path.Combine(absolute, "styles.xml"), StyleXml);
+        var inBase = "ttgbase" + Guid.NewGuid().ToString("N") + ".xml";
+        File.WriteAllText(Path.Combine(AppContext.BaseDirectory, inBase), StyleXml);
+        try
+        {
+            foreach (var root in new[] { folder, "./" + folder, Path.Combine(folder, "..", folder), absolute })
+            {
+                var writer = new JsonSpreedSheet(new TemplatingOptions { StylesheetRoot = root });
+                using var stream = new MemoryStream();
+                writer.CreateExcelDoc(stream, Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = "styles.xml" }));
+                Assert.True(stream.Length > 0);
+            }
+
+            // an empty root is the application base directory
+            using var emptyRootStream = new MemoryStream();
+            new JsonSpreedSheet().CreateExcelDoc(emptyRootStream, Workbook(new JArray(), stylesheets: new JObject { ["TemplatePath"] = inBase }));
+            Assert.True(emptyRootStream.Length > 0);
+        }
+        finally
+        {
+            Directory.Delete(absolute, recursive: true);
+            File.Delete(Path.Combine(AppContext.BaseDirectory, inBase));
+        }
+    }
 }

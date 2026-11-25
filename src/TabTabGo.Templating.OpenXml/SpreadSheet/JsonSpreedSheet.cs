@@ -594,9 +594,10 @@ public class JsonSpreedSheet
 
     private static UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative, uint styleCount)
     {
-        if (jCell["StyleIndex"] != null)
+        var explicitToken = jCell["StyleIndex"];
+        if (explicitToken != null && explicitToken.Type is not (JTokenType.Null or JTokenType.Undefined)) // a JSON null means "not given": the Format lookup stays active
         {
-            var explicitIndex = ReadWholeNumber(jCell["StyleIndex"], "StyleIndex", 0, uint.MaxValue) ?? 0;
+            var explicitIndex = ReadWholeNumber(explicitToken, "StyleIndex", 0, uint.MaxValue) ?? 0;
             if (explicitIndex >= Math.Max(styleCount, 1))
             {
                 throw new ArgumentException($"A StyleIndex is outside the stylesheet's {styleCount} cell formats.", "json");
@@ -615,8 +616,10 @@ public class JsonSpreedSheet
         var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
         if (map != null)
         {
-            var mapped = useAlternative && map["SAlternativeIndex"] != null
-                ? ReadWholeNumber(map["SAlternativeIndex"], "SAlternativeIndex", 0, uint.MaxValue) ?? 0
+            var alternativeToken = map["SAlternativeIndex"];
+            var hasAlternative = alternativeToken != null && alternativeToken.Type is not (JTokenType.Null or JTokenType.Undefined); // null means "not given": SIndex is used
+            var mapped = useAlternative && hasAlternative
+                ? ReadWholeNumber(alternativeToken, "SAlternativeIndex", 0, uint.MaxValue) ?? 0
                 : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
             if (mapped >= Math.Max(styleCount, 1))
             {

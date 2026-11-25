@@ -36,7 +36,7 @@ internal static class RealPath
     {
         try
         {
-            return ResolveCore(absolutePath);
+            return ResolveCore(Path.GetFullPath(absolutePath)); // a relative path (a relative root such as "Templates", "./tpl" or "") is made absolute first, like the check it replaced
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
