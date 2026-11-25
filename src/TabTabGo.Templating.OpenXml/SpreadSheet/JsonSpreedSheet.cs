@@ -137,7 +137,7 @@ public class JsonSpreedSheet
             ids[i] = ReadSheetId(jSheets[i]["SheetId"]);
             if (ids[i] is { } explicitId && !used.Add(explicitId))
             {
-                throw new ArgumentException($"SheetId {explicitId} is used by more than one sheet.", "json");
+                throw new ArgumentException("A SheetId is used by more than one sheet.", "json");
             }
         }
 
@@ -183,7 +183,7 @@ public class JsonSpreedSheet
         var number = ReadDouble(token, what);
         if (!(number >= min && number <= max) || number != Math.Floor(number))
         {
-            throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", CultureInfo.InvariantCulture)} to {max.ToString("0", CultureInfo.InvariantCulture)} ({token}).", "json");
+            throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", CultureInfo.InvariantCulture)} to {max.ToString("0", CultureInfo.InvariantCulture)}.", "json");
         }
 
         return (uint)number;
@@ -206,12 +206,12 @@ public class JsonSpreedSheet
                 case JTokenType.String when double.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed):
                     return parsed;
                 default:
-                    throw new ArgumentException($"{what} must be a number ({token}).", "json");
+                    throw new ArgumentException($"{what} must be a number.", "json");
             }
         }
         catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
         {
-            throw new ArgumentException($"{what} must be a number ({token}).", "json", ex);
+            throw new ArgumentException($"{what} must be a number.", "json"); // no inner exception: its message quotes the value
         }
     }
 
@@ -231,7 +231,7 @@ public class JsonSpreedSheet
         {
             "true" or "1" => true,
             "false" or "0" => false,
-            _ => throw new ArgumentException($"{what} must be true or false ({token}).", "json"),
+            _ => throw new ArgumentException($"{what} must be true or false.", "json"),
         };
     }
 
@@ -245,7 +245,7 @@ public class JsonSpreedSheet
             names[i] = (string?)jSheets[i]["Name"];
             if (names[i] is { } explicitName && !used.Add(ValidateSheetName(explicitName)))
             {
-                throw new ArgumentException($"The sheet name '{explicitName}' is used more than once (names are compared ignoring case).", "json");
+                throw new ArgumentException("A sheet name is used more than once (names are compared ignoring case).", "json");
             }
         }
 
@@ -301,7 +301,7 @@ public class JsonSpreedSheet
             var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
             if (min > max)
             {
-                throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
+                throw new ArgumentException("Column Min may not be greater than Max.", "json");
             }
 
             var column = new Column
@@ -317,7 +317,7 @@ public class JsonSpreedSheet
                 var width = ReadDouble(given, "Column Width");
                 if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
                 {
-                    throw new ArgumentException($"Column Width must be a number from 0 to 255 ({given}).", "json");
+                    throw new ArgumentException("Column Width must be a number from 0 to 255.", "json");
                 }
 
                 column.Width = DoubleValue.FromDouble(width);
@@ -478,12 +478,12 @@ public class JsonSpreedSheet
             var serial = ReadDouble(value, "A Date cell");
             return serial >= 1 && serial <= MaxDateSerial
                 ? serial.ToString("R", CultureInfo.InvariantCulture)
-                : throw new ArgumentException($"A Date cell holding a number must be an Excel serial from 1 to {MaxDateSerial.ToString("0", CultureInfo.InvariantCulture)} ({text}).", "json");
+                : throw new ArgumentException($"A Date cell holding a number must be an Excel serial from 1 to {MaxDateSerial.ToString("0", CultureInfo.InvariantCulture)}.", "json");
         }
 
         return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
             ? DateToSerial(parsed)
-            : throw new ArgumentException($"A Date cell must hold a date, or an Excel serial number ({text}).", "json");
+            : throw new ArgumentException("A Date cell must hold a date, or an Excel serial number.", "json");
     }
 
     /// <summary>
@@ -505,7 +505,7 @@ public class JsonSpreedSheet
 
         if (double.IsNaN(serial) || serial < FirstSafeDateSerial || Math.Floor(serial) > MaxDateSerial)
         {
-            throw new ArgumentException($"A Date cell must hold a date from 1900-03-01 to 9999-12-31 ({date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}).", "json");
+            throw new ArgumentException("A Date cell must hold a date from 1900-03-01 to 9999-12-31.", "json");
         }
 
         return serial.ToString("R", CultureInfo.InvariantCulture);
@@ -599,7 +599,7 @@ public class JsonSpreedSheet
             var explicitIndex = ReadWholeNumber(jCell["StyleIndex"], "StyleIndex", 0, uint.MaxValue) ?? 0;
             if (explicitIndex >= Math.Max(styleCount, 1))
             {
-                throw new ArgumentException($"StyleIndex {explicitIndex} is outside the stylesheet's {styleCount} cell formats.", "json");
+                throw new ArgumentException($"A StyleIndex is outside the stylesheet's {styleCount} cell formats.", "json");
             }
 
             return UInt32Value.FromUInt32(explicitIndex);
@@ -620,7 +620,7 @@ public class JsonSpreedSheet
                 : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
             if (mapped >= Math.Max(styleCount, 1))
             {
-                throw new ArgumentException($"The StyleMap index {mapped} of '{format}' is outside the stylesheet's {styleCount} cell formats.", "json");
+                throw new ArgumentException($"A StyleMap index is outside the stylesheet's {styleCount} cell formats.", "json");
             }
 
             return UInt32Value.FromUInt32(mapped);

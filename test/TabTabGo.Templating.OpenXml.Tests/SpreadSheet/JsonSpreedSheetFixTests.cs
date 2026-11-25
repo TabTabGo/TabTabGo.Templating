@@ -1354,4 +1354,61 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
     }
+
+    // ---- no JSON value in any exception text: a workbook comes from data and may hold personal data
+
+    private const string Sentinel = "SECRET-PII-12345";
+    private const string NumericSentinel = "987654321";
+
+    private static void AssertNoSentinel(Func<JObject> workbook)
+    {
+        var failure = Record.Exception(() => new JsonSpreedSheet().CreateExcelDoc(new MemoryStream(), workbook()));
+
+        Assert.NotNull(failure);
+        for (var e = failure; e != null; e = e.InnerException)
+        {
+            var text = e.Message + "\n" + e.ToString() + "\n" + string.Join("\n", e.Data.Values.Cast<object?>().Select(v => v?.ToString()));
+            Assert.DoesNotContain(Sentinel, text);
+            Assert.DoesNotContain(NumericSentinel, text);
+        }
+    }
+
+    [Fact]
+    public void Pii_NoValidatorPath_PutsTheJsonValueInAnExceptionText()
+    {
+        JObject Column(string member, JToken value)
+        {
+            var column = new JObject { ["Min"] = 1, ["Max"] = 2, ["BestFit"] = true, ["Width"] = 10 };
+            column[member] = value;
+            return WorkbookWithColumn(column);
+        }
+
+        JObject Cell1(string type, JToken value) => Workbook(new JArray(Row(new JObject { ["DataType"] = type, ["CellValue"] = value })));
+
+        AssertNoSentinel(() => Cell1("Date", Sentinel));
+        AssertNoSentinel(() => Cell1("Date", long.Parse(NumericSentinel)));
+        AssertNoSentinel(() => Cell1("Number", Sentinel));
+        AssertNoSentinel(() => Cell1("Boolean", Sentinel));
+        AssertNoSentinel(() => Cell1("Error", Sentinel));
+        AssertNoSentinel(() => Workbook(new JArray(Row(new JObject { ["CellValue"] = "x", ["StyleIndex"] = Sentinel }))));
+        AssertNoSentinel(() => Workbook(new JArray(Row(new JObject { ["CellValue"] = "x", ["StyleIndex"] = long.Parse(NumericSentinel) }))));
+        AssertNoSentinel(() => Workbook(new JArray(Row(Cell(null, "x", "X"))), styleMap: new JArray(new JObject { ["Key"] = "X", ["SIndex"] = long.Parse(NumericSentinel) })));
+        AssertNoSentinel(() => Workbook(new JArray(Row(Cell(null, "x", "X"))), styleMap: new JArray(new JObject { ["Key"] = "X", ["SIndex"] = Sentinel })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = Sentinel, ["Name"] = "A" })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = long.Parse(NumericSentinel), ["Name"] = "A" })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = Sentinel }, new JObject { ["SheetId"] = 2, ["Name"] = Sentinel.ToLowerInvariant() })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = "'" + Sentinel })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = Sentinel + "/" })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = Sentinel + "\u0001" })));
+        AssertNoSentinel(() => Workbook(new JArray(), new JArray(new JObject { ["SheetId"] = 1, ["Name"] = "A" }, new JObject { ["SheetId"] = 1, ["Name"] = Sentinel })));
+        AssertNoSentinel(() => Column("Min", Sentinel));
+        AssertNoSentinel(() => Column("Min", long.Parse(NumericSentinel)));
+        AssertNoSentinel(() => Column("Max", Sentinel));
+        AssertNoSentinel(() => Column("Width", Sentinel));
+        AssertNoSentinel(() => Column("Width", long.Parse(NumericSentinel)));
+        AssertNoSentinel(() => Column("BestFit", Sentinel));
+        AssertNoSentinel(() => Column("BestFit", long.Parse(NumericSentinel)));
+        AssertNoSentinel(() => Workbook(new JArray(new JObject { ["Collapsed"] = Sentinel })));
+        AssertNoSentinel(() => Workbook(new JArray(new JObject { ["Collapsed"] = long.Parse(NumericSentinel) })));
+    }
 }
