@@ -148,7 +148,7 @@ internal static class FilterCriteriaGuard
     /// <param name="nesting">The nesting <see cref="CheckNesting"/> measured.</param>
     internal static bool IsShallow(string criteria, int nesting)
     {
-        if (criteria.Length > ShallowCharacters || nesting > ShallowNesting || criteria.Contains('{') || criteria.Contains("=>", StringComparison.Ordinal))
+        if (criteria.Length > ShallowCharacters || nesting > ShallowNesting || criteria.Contains('[') || criteria.Contains('{') || criteria.Contains("=>", StringComparison.Ordinal))
         {
             return false;
         }
