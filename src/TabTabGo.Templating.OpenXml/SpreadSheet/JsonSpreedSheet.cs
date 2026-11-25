@@ -92,7 +92,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
                 if (min > max)
                 {
-                    throw new ArgumentException($"Column Min ({min}) may not be greater than Max ({max}).", "json");
+                    throw new ArgumentException("Column Min may not be greater than Max.", "json");
                 }
 
                 var column = new Column()
@@ -108,7 +108,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     var width = ReadDouble(widthToken, "Column Width");
                     if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
                     {
-                        throw new ArgumentException($"Column Width must be a number from 0 to 255 ({jColumn["Width"]}).", "json");
+                        throw new ArgumentException("Column Width must be a number from 0 to 255.", "json");
                     }
 
                     column.Width = DoubleValue.FromDouble(width);
@@ -187,7 +187,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 {
                     if (!DateTime.TryParse(dateText, out var date))
                     {
-                        throw new ArgumentException($"A Date cell must hold a date ({dateText}).", "json");
+                        throw new ArgumentException("A Date cell must hold a date.", "json");
                     }
 
                     cell.CellValue = new CellValue(date.ToUniversalTime().ToString());
@@ -359,7 +359,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 var explicitIndex = ReadWholeNumber(explicitToken, "StyleIndex", 0, uint.MaxValue) ?? 0;
                 if (explicitIndex >= Math.Max(styleCount, 1))
                 {
-                    throw new ArgumentException($"StyleIndex {explicitIndex} is outside the stylesheet's {styleCount} cell formats.", "json");
+                    throw new ArgumentException($"A StyleIndex is outside the stylesheet's {styleCount} cell formats.", "json");
                 }
 
                 return UInt32Value.FromUInt32(explicitIndex);
@@ -387,7 +387,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
                 if (mapped >= Math.Max(styleCount, 1))
                 {
-                    throw new ArgumentException($"The StyleMap index {mapped} of '{format}' is outside the stylesheet's {styleCount} cell formats.", "json");
+                    throw new ArgumentException($"A StyleMap index is outside the stylesheet's {styleCount} cell formats.", "json");
                 }
 
                 return UInt32Value.FromUInt32(mapped);
@@ -429,13 +429,13 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
                 if (!names.Add(name))
                 {
-                    throw new ArgumentException($"The sheet name '{name}' is used more than once (names are compared ignoring case).", "json");
+                    throw new ArgumentException("A sheet name is used more than once (names are compared ignoring case).", "json");
                 }
 
                 var id = ReadSheetId(sheet["SheetId"]) ?? throw new ArgumentException("Every sheet needs a SheetId (a whole number from 1).", "json");
                 if (!ids.Add(id))
                 {
-                    throw new ArgumentException($"SheetId {id} is used by more than one sheet.", "json");
+                    throw new ArgumentException("A SheetId is used by more than one sheet.", "json");
                 }
 
                 idList.Add(id);
@@ -501,7 +501,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var number = ReadDouble(token, what);
             if (!(number >= min && number <= max) || number != Math.Floor(number))
             {
-                throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} to {max.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} ({token}).", "json");
+                throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} to {max.ToString("0", System.Globalization.CultureInfo.InvariantCulture)}.", "json");
             }
 
             return (uint)number;
@@ -524,10 +524,10 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             }
             catch (Exception ex) when (ex is InvalidCastException || ex is FormatException || ex is OverflowException)
             {
-                throw new ArgumentException($"{what} must be a number ({token}).", "json", ex);
+                throw new ArgumentException($"{what} must be a number.", "json"); // no inner exception: its message quotes the value
             }
 
-            throw new ArgumentException($"{what} must be a number ({token}).", "json");
+            throw new ArgumentException($"{what} must be a number.", "json");
         }
 
         private static bool ReadBoolean(JToken? token, string what)
@@ -553,7 +553,7 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 return false;
             }
 
-            throw new ArgumentException($"{what} must be true or false ({token}).", "json");
+            throw new ArgumentException($"{what} must be true or false.", "json");
         }
 
         private static string ToValidXml(string s)
