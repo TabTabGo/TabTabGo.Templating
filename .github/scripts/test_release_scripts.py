@@ -144,6 +144,58 @@ class VulnGateFailClosedTests(unittest.TestCase):
             self.assertNotEqual(0, vuln_gate.main())
 
 
+class VulnGateExtractionTests(unittest.TestCase):
+    CLEAN = '{"version": 1, "sources": ["s"], "projects": [{"path": "a"}]}'
+
+    def _run(self, text):
+        with unittest.mock.patch("sys.stdin", io.StringIO(text)), contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            return vuln_gate.main()
+
+    def test_a_warning_line_with_a_brace_before_the_report_does_not_break_a_clean_audit(self):
+        self.assertEqual(0, self._run("warning NU1900: could not read {feed} metadata\n" + self.CLEAN))
+        self.assertEqual(0, self._run("{ not json\n" + self.CLEAN))
+
+    def test_a_non_dict_vulnerability_entry_is_a_finding(self):
+        report = {"sources": ["s"], "projects": [{"path": "a", "frameworks": [{"framework": "net10.0", "topLevelPackages": [
+            {"id": "X", "resolvedVersion": "1.0.0", "vulnerabilities": ["oops", 3]}]}]}]}
+        self.assertEqual(1, self._run(json.dumps(report)))
+        self.assertEqual(1, len(vuln_gate.find_vulnerabilities(report)))
+
+    def test_no_parseable_report_fails_closed(self):
+        for text in ("", "   ", "no json here", "{ broken", "[1, 2]", '{"unrelated": 1}', "warning {x}\nstill nothing"):
+            with self.subTest(text=text):
+                self.assertEqual(2, self._run(text))
+
+
+class LocalPinTests(unittest.TestCase):
+    def _repo(self, packages="", description=""):
+        root = Path(tempfile.mkdtemp())
+        (root / "src").mkdir()
+        (root / "Directory.Packages.props").write_text(f"<Project><PropertyGroup><Description>{description}</Description></PropertyGroup><ItemGroup>{packages}</ItemGroup></Project>")
+        (root / "global.json").write_text("{}")
+        return root
+
+    def test_a_description_with_the_word_local_does_not_block(self):
+        release_guards.check_pins_match_release_kind(self._repo(description="published to a -local feed for tests"), False)
+
+    def test_a_comment_with_the_word_local_does_not_block(self):
+        root = self._repo()
+        (root / "Directory.Packages.props").write_text("<Project><!-- TabTabGo.Core 10.0.0-local.1 is used by developers --><ItemGroup/></Project>")
+        release_guards.check_pins_match_release_kind(root, False)
+
+    def test_a_real_local_core_range_blocks(self):
+        for version in ("10.0.0-local.abc1234", "[10.0.0-local.abc1234, 11.0.0)"):
+            with self.subTest(version=version):
+                with self.assertRaises(release_guards.GuardError):
+                    release_guards.check_pins_match_release_kind(self._repo(packages=f'<PackageVersion Include="TabTabGo.Core" Version="{version}" />'), True)
+
+    def test_a_malformed_props_file_fails_closed(self):
+        root = self._repo()
+        (root / "Directory.Packages.props").write_text("<Project><oops")
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(root, False)
+
+
 class AssertPackagesTests(unittest.TestCase):
     def _write(self, directory, package_id, version, dep_version, tfm="net8.0", dotliquid="[2.3.260, 2.4.0)"):
         dep = "" if package_id == "TabTabGo.Templating" else f'<dependency id="TabTabGo.Templating" version="{dep_version}" />'

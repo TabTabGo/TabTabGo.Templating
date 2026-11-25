@@ -137,6 +137,18 @@ def check_declared_version(root: Path, core: str) -> None:
         raise GuardError(f"Directory.Build.props declares Version {declared} but the tag is for {core}")
 
 
+def references_local_build(path: Path) -> bool:
+    """True when a version a build resolves (a Version, VersionOverride or Include attribute, or a Version element) names a -local build; descriptions and comments do not count."""
+    for element in ET.parse(path).getroot().iter():
+        for name in ("Version", "VersionOverride", "Include", "Update"):
+            if "-local" in element.attrib.get(name, ""):
+                return True
+        tag = element.tag.rpartition("}")[2]
+        if tag in ("Version", "VersionOverride", "PackageVersion") and "-local" in (element.text or ""):
+            return True
+    return False
+
+
 def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
     """A stable tag may not ship with pre-release SDK settings or pre-release or -local package pins (v11 stays an rc until GA)."""
     problems: list[str] = []
@@ -147,8 +159,11 @@ def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8-sig")
-        if "-local" in text:
-            problems.append(f"{path.name} references a -local build")
+        try:
+            if references_local_build(path):
+                problems.append(f"{path.name} references a -local build")
+        except ET.ParseError:
+            problems.append(f"{path.name} is not well-formed XML")
         if not prerelease and re.search(r'Version="[^"]*-(rc|preview|alpha|beta)[^"]*"', text):
             problems.append(f"{path.name} pins a pre-release package")
     if problems:
