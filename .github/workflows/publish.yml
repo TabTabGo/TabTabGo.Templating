@@ -1,6 +1,6 @@
 name: publish
 
-# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|ci|alpha|beta).N
+# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH (releases are stable; a pre-release suffix is still parsed by the guards but none is published)
 # from a commit on releases/vMAJOR.MINOR.x/vMAJOR.MINOR.PATCH (spec section 8.2, ADR 0001).
 # No workflow_dispatch on purpose. Authentication is nuget.org trusted publishing (OIDC): no long-lived key is stored.
 

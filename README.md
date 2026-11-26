@@ -17,7 +17,7 @@ referenced together. None of the packages depends on `TabTabGo.Core` (ADR 0002):
 |---|---|---|---|
 | v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.4 is the security backport). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.N` | net10.0 | LTS line (this branch): every defect of spec section 6 fixed, sandboxing, options + DI, goldens, coverage gates |
-| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | pre-release (`-rc.N`) until .NET 11 GA; built and verified on CI only until a .NET 11 SDK is installed |
+| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | stable `11.0.0` once .NET 11 is GA; built and verified on CI only until a .NET 11 SDK is installed |
 
 Design and decisions: `tabtabgo/docs/templating-modernization/` in the ttg-workspace (spec and ADRs 0001-0005).
 
@@ -60,7 +60,7 @@ Packages are published **only from tags**. There is no publish from `master` or 
 
 1. Set `<Version>` in `Directory.Build.props` on the release branch `releases/vM.m.x/vM.m.p`.
 2. Merge the feature branch into the release branch through a pull request (`ci` must pass).
-3. Push the tag `vM.m.p` (or `vM.m.p-rc.N`) on the release branch commit.
+3. Push the tag `vM.m.p` on the release branch commit.
 4. `publish.yml` checks the tag against the commit (tag major equals target framework major, tag is on its release branch, version equals the
    tag, a stable tag carries no pre-release pins, version not yet on nuget.org), builds with `-warnaserror`, tests with the coverage gate,
    scans, packs, checks the package set (names, version, target framework, bounded dependency ranges, no `-local` builds) and publishes

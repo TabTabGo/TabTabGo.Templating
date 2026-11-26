@@ -34,13 +34,13 @@ class GuardError(Exception):
 
 
 def parse_tag(tag: str) -> dict[str, str | bool]:
-    """Step 2: version from the tag; must be a stable or rc/ci/alpha/beta pre-release version."""
+    """Step 2: version from the tag. Releases are stable (vMAJOR.MINOR.PATCH) and the project publishes no -rc tags; a pre-release suffix is still parsed so that a mistaken pre-release tag is judged by the pre-release rules, never waved through."""
     if not tag.startswith("v"):
         raise GuardError(f"tag '{tag}' does not start with 'v'")
     version = tag[1:]
     match = TAG_VERSION.fullmatch(version)
     if not match:
-        raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|ci|alpha|beta).N")
+        raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH (releases are stable versions)")
     return {
         "version": version,
         "core": match.group("core"),
@@ -244,7 +244,7 @@ def references_local_build(path: Path, properties: PropertyValues | None = None)
 
 
 def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
-    """A stable tag may not ship with pre-release SDK settings or pre-release or -local package pins (v11 stays an rc until GA)."""
+    """A stable tag may not ship with pre-release SDK settings or pre-release or -local package pins (releases are stable; no -rc tags are published)."""
     problems: list[str] = []
     global_json = root / "global.json"
     if not prerelease and global_json.exists() and re.search(r'"allowPrerelease"\s*:\s*true', global_json.read_text(encoding="utf-8-sig")):
@@ -273,7 +273,7 @@ def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
         except ET.ParseError:
             problems.append(f"{path.name} is not well-formed XML")
     if problems:
-        raise GuardError("; ".join(problems) + (" (a stable tag needs stable pins; tag an -rc instead)" if not prerelease else ""))
+        raise GuardError("; ".join(problems) + (" (a stable tag needs stable pins)" if not prerelease else ""))
 
 
 def published_versions(package_id: str) -> set[str]:
