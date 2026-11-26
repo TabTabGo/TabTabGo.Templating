@@ -53,6 +53,17 @@ public sealed class TemplateNestingHardeningTests
     }
 
     [Fact]
+    public void StackFor_AnUnverifiedDotLiquidVersion_GetsTheMaximumStack()
+    {
+        var real = TemplateNesting.CreateTokenizer(typeof(Template).Assembly.GetType("DotLiquid.Tokenizer"));
+
+        Assert.Equal(TemplateNesting.ParseStackBytes(100), TemplateNesting.StackFor(100, real, new Version(2, 3, 260)));
+        Assert.Equal(256 * 1024 * 1024, TemplateNesting.StackFor(100, real, new Version(2, 4, 0)));
+        Assert.Equal(256 * 1024 * 1024, TemplateNesting.StackFor(100, real, new Version(2, 3, 261)));
+        Assert.Equal(256 * 1024 * 1024, TemplateNesting.StackFor(100, null, new Version(2, 3, 260)));
+    }
+
+    [Fact]
     public void CreateTokenizer_BindsDotLiquidsTokenizer()
     {
         var type = typeof(Template).Assembly.GetType("DotLiquid.Tokenizer");

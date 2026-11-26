@@ -172,7 +172,7 @@ namespace TabTabGo.Templating.Liquid
             // of one path share an entry (B-2).
             var lastWrite = File.GetLastWriteTimeUtc(fullPath);
             var key = (fullPath, lastWrite, _options.MaxNestingDepth);
-            var entry = _templateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path, _options.MaxNestingDepth), LazyThreadSafetyMode.ExecutionAndPublication));
+            var entry = _templateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path, k.MaxNestingDepth), LazyThreadSafetyMode.ExecutionAndPublication));
 
             foreach (var stale in _templateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
             {
