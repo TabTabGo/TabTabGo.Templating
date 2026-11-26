@@ -91,6 +91,68 @@ public sealed class TemplateNestingDifferentialTests
         return (rejected, over, under);
     }
 
+    private static int TreeDepth(object? node) =>
+        node is Block block ? 1 + block.NodeList.Select(TreeDepth).DefaultIfEmpty(0).Max() : 0;
+
+    private static Template? ParseOnALargeStack(string template)
+    {
+        Template? parsed = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    parsed = Template.Parse(template);
+                }
+                catch (global::DotLiquid.Exceptions.SyntaxException)
+                {
+                    parsed = null; // the stock parser refuses it: nothing to compare
+                }
+            },
+            maxStackSize: 256 * 1024 * 1024);
+        thread.Start();
+        thread.Join();
+        return parsed;
+    }
+
+    /// <summary>m-60: the scan never reports less depth than DotLiquid's parse tree has, whatever spelling of the end tag precedes deep nesting (the fallback and the exact path alike).</summary>
+    [Fact]
+    public void Depth_IsNeverLessThanTheParseTreeDepth_ForDirectedEndTagSpellings()
+    {
+        var closers = new[]
+        {
+            "{%- end{k} -%}", "{%\nend{k}\n%}", "{%\r\nend{k} %}", "{%-end{k}-%}", "{% end{k} junk %}", "{% END{K} %}", "{% end{k} %}",
+        };
+        var nesting = string.Concat(Enumerable.Repeat("{% if a %}", 150)) + "x" + string.Concat(Enumerable.Repeat("{% endif %}", 150));
+        var templates = new List<string> { "{% literal %}{% raw %}{% endliteral %}{% endraw %}" + nesting };
+        foreach (var kind in new[] { "literal", "raw", "comment" })
+        {
+            foreach (var closer in closers)
+            {
+                var end = closer.Replace("{k}", kind).Replace("{K}", kind.ToUpperInvariant());
+                templates.Add("{% " + kind + " %}" + end + nesting); // opened, then closed in that spelling
+                templates.Add(end + nesting);                         // a stray end tag
+            }
+        }
+
+        var compared = 0;
+        foreach (var template in templates)
+        {
+            var parsed = ParseOnALargeStack(template);
+            if (parsed == null)
+            {
+                continue;
+            }
+
+            var treeDepth = parsed.Root.NodeList.Select(TreeDepth).DefaultIfEmpty(0).Max();
+            Assert.True(TemplateNesting.Depth(template) >= treeDepth, $"scan {TemplateNesting.Depth(template)} < tree {treeDepth}: {template[..Math.Min(60, template.Length)].Replace("\n", "\\n").Replace("\r", "\\r")}");
+            Assert.True(TemplateNesting.Depth(TemplateNesting.Tokens(template, null), int.MaxValue) >= 0);
+            compared++;
+        }
+
+        Assert.True(compared > 0, "at least one template parses on the stock parser");
+    }
+
     [Fact]
     public void LiteralBlocks_AreSkippedLikeRawAndComment_AndNeverRefuseATemplateStockParseAccepts()
     {
