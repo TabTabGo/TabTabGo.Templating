@@ -1,14 +1,15 @@
 name: publish
 
-# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|ci|alpha|beta).N
+# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH (only stable versions are released: the guards refuse any pre-release suffix or build metadata)
 # from a commit on releases/vMAJOR.MINOR.x/vMAJOR.MINOR.PATCH (spec section 8.2, ADR 0001).
+# Stable publishing needs the repository variable STABLE_PUBLISH_MODE=environment (an attestation that the nuget-stable environment has required reviewers) and the repository variable NUGET_USER (the nuget.org profile name, not a credential).
+# The publish job checks out nothing: it only downloads the packages the build job produced, re-verifies the set, and pushes them.
 # No workflow_dispatch on purpose. Authentication is nuget.org trusted publishing (OIDC): no long-lived key is stored.
 
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -23,7 +24,6 @@ jobs:
     timeout-minutes: 30
     outputs:
       version: ${{ steps.guards.outputs.version }}
-      prerelease: ${{ steps.guards.outputs.prerelease }}
     steps:
       - name: Refuse re-runs and actor mismatches (a re-run keeps the original actor; tag again instead)
         env:
@@ -33,6 +33,15 @@ jobs:
         run: |
           if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs of a publish run are not allowed; push a new tag"; exit 1; fi
           if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor"; exit 1; fi
+
+      - name: Require the stable-publish attestation (fails closed before anything is built)
+        env:
+          PUBLISH_MODE: ${{ vars.STABLE_PUBLISH_MODE }}
+        run: |
+          if [ "$PUBLISH_MODE" != "environment" ]; then
+            echo "::error::the repository variable STABLE_PUBLISH_MODE must be 'environment': it attests that the nuget-stable environment has required reviewers"
+            exit 1
+          fi
 
       - name: Checkout the tag explicitly (full history so release branches and tags are available)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -95,10 +104,12 @@ jobs:
 
   publish:
     needs: build
+    # Fails CLOSED: without the repository variable STABLE_PUBLISH_MODE=environment (attesting that nuget-stable has required reviewers) this job never runs.
+    if: vars.STABLE_PUBLISH_MODE == 'environment'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Stable tags wait for the required reviewers of the nuget-stable environment.
-    environment: ${{ needs.build.outputs.prerelease == 'true' && 'nuget-prerelease' || 'nuget-stable' }}
+    environment: nuget-stable
     permissions:
       id-token: write # the only job allowed to request an OIDC token
       contents: read
@@ -118,11 +129,30 @@ jobs:
           name: packages
           path: out
 
+      - name: Verify the downloaded package set before login (no repository code runs in this job)
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::the build job produced no valid stable version"; exit 1
+          fi
+          expected=$(printf 'TabTabGo.Templating.%s.nupkg\nTabTabGo.Templating.Dotliquid.%s.nupkg\nTabTabGo.Templating.OpenXml.%s.nupkg\n' "$VERSION" "$VERSION" "$VERSION" | sort)
+          actual=$(for f in out/*.nupkg; do basename "$f"; done | sort) # the glob matches .nupkg only, never .snupkg
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::the downloaded packages are not exactly the three expected for $VERSION"; echo "$actual"; exit 1
+          fi
+
+      - name: Require the trusted-publishing user
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          [ -n "$NUGET_USER" ] || { echo "::error::repository variable NUGET_USER is not set (nuget.org profile name for trusted publishing)"; exit 1; }
+
       - name: NuGet trusted publishing login (1-hour, single-use API key)
         id: login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
-          user: ${{ secrets.NUGET_USER }}
+          user: ${{ vars.NUGET_USER }}
 
       - name: Push to nuget.org
         env:

@@ -18,13 +18,31 @@ class ParseTagTests(unittest.TestCase):
         info = release_guards.parse_tag("v8.0.3")
         self.assertEqual(("8.0.3", "8", False), (info["version"], info["major"], info["prerelease"]))
 
-    def test_rc_tag_is_prerelease(self):
-        info = release_guards.parse_tag("v10.0.0-rc.1")
-        self.assertTrue(info["prerelease"])
-        self.assertEqual("10.0.0", info["core"])
+    def test_prerelease_tags_and_build_metadata_are_refused_with_a_clear_message(self):
+        for tag in ("v10.0.0-rc.1", "v11.0.0-rc.1", "v8.0.5-beta.1", "v8.0.5-ci.7", "v8.0.5-alpha.1", "v10.0.0+x", "v10.0.0-rc.1+x", "v8.0.3-foo", "v8.0.3-rc"):
+            with self.subTest(tag=tag):
+                with self.assertRaises(release_guards.GuardError) as raised:
+                    release_guards.parse_tag(tag)
+                self.assertIn("only stable vMAJOR.MINOR.PATCH tags are released", str(raised.exception))
+
+    def test_stable_tags_pass_and_report_no_prerelease(self):
+        for tag, core in (("v10.0.0", "10.0.0"), ("v11.0.0", "11.0.0"), ("v8.0.5", "8.0.5")):
+            with self.subTest(tag=tag):
+                info = release_guards.parse_tag(tag)
+                self.assertEqual((core, False), (info["core"], info["prerelease"]))
+                self.assertEqual(core, info["version"])
+
+    def test_main_refuses_a_prerelease_tag_before_any_other_check(self):
+        for tag in ("v11.0.0-rc.1", "v8.0.5-beta.1", "v10.0.0+x"):
+            with self.subTest(tag=tag):
+                with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = release_guards.main([tag, "0" * 40, "--offline", "--root", tempfile.mkdtemp()])
+                self.assertEqual(1, code)
+                self.assertIn("only stable", err.getvalue())
+                self.assertEqual("", out.getvalue())
 
     def test_rejects_bad_tags(self):
-        for tag in ("8.0.3", "v8.0", "v8.0.3-foo", "v8.0.3+meta", "v8.0.3-rc",
+        for tag in ("8.0.3", "v8.0", "v8.0.3-foo", "v8.0.3+meta", "v8.0.3-rc", "v8.0.3-",
                     "v8.0.3\n", "v08.0.3", "v8.00.3", "v8.0.03", "v8.0.3-rc.01", "v\u0668.0.3", "v8.0.3-rc.\u0661"):
             with self.subTest(tag=tag):
                 with self.assertRaises(release_guards.GuardError):
@@ -115,6 +133,69 @@ class VulnGateFailClosedTests(unittest.TestCase):
     def test_not_json_fails(self):
         with unittest.mock.patch("sys.stdin", io.StringIO("Unable to load")), contextlib.redirect_stderr(io.StringIO()):
             self.assertNotEqual(0, vuln_gate.main())
+
+
+class VulnGateExtractionTests(unittest.TestCase):
+    CLEAN = '{"version": 1, "sources": ["s"], "projects": [{"path": "a"}]}'
+
+    def _run(self, text):
+        with unittest.mock.patch("sys.stdin", io.StringIO(text)), contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            return vuln_gate.main()
+
+    def test_a_warning_line_with_a_brace_before_the_report_does_not_break_a_clean_audit(self):
+        self.assertEqual(0, self._run("warning NU1900: could not read {feed} metadata\n" + self.CLEAN))
+        self.assertEqual(0, self._run("{ not json\n" + self.CLEAN))
+
+    def test_a_non_dict_vulnerability_entry_is_a_finding(self):
+        report = {"sources": ["s"], "projects": [{"path": "a", "frameworks": [{"framework": "net10.0", "topLevelPackages": [
+            {"id": "X", "resolvedVersion": "1.0.0", "vulnerabilities": ["oops", 3]}]}]}]}
+        self.assertEqual(1, self._run(json.dumps(report)))
+        self.assertEqual(1, len(vuln_gate.find_vulnerabilities(report)))
+
+    def test_no_parseable_report_fails_closed(self):
+        for text in ("", "   ", "no json here", "{ broken", "[1, 2]", '{"unrelated": 1}', "warning {x}\nstill nothing"):
+            with self.subTest(text=text):
+                self.assertEqual(2, self._run(text))
+
+
+class PublishWorkflowShapeTests(unittest.TestCase):
+    """The privileged job runs no repository code, publishes by trusted publishing only, and fails closed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (Path(__file__).resolve().parents[1] / "workflows" / "publish.yml").read_text(encoding="utf-8")
+        cls.build, cls.publish = cls.text.split("\n  publish:\n")
+
+    def test_publish_job_checks_out_nothing_and_runs_no_repository_script(self):
+        self.assertNotIn("actions/checkout", self.publish)
+        self.assertNotIn(".github/scripts", self.publish)
+        self.assertNotIn("refs/tags", self.publish)
+        self.assertNotIn("github.ref", self.publish.replace("github.run_attempt", ""))
+
+    def test_only_the_publish_job_has_an_id_token_and_it_uses_the_stable_environment(self):
+        self.assertNotIn("id-token", self.build)
+        self.assertIn("id-token: write", self.publish)
+        self.assertIn("environment: nuget-stable", self.publish)
+        self.assertNotIn("nuget-prerelease", self.text)
+        self.assertNotIn("prerelease", self.text.replace("pre-release", ""))
+
+    def test_trusted_publishing_not_a_stored_api_key(self):
+        self.assertIn("NuGet/login@", self.publish)
+        self.assertIn("user: ${{ vars.NUGET_USER }}", self.publish)
+        self.assertNotIn("secrets.NUGET_USER", self.text)  # the profile name is a repository variable, not a credential
+        self.assertIn("NUGET_USER: ${{ vars.NUGET_USER }}", self.publish)
+        self.assertIn('[ -n "$NUGET_USER" ]', self.publish)
+        self.assertLess(self.publish.index("Require the trusted-publishing user"), self.publish.index("NuGet/login@"))
+        self.assertIn("steps.login.outputs.NUGET_API_KEY", self.publish)
+        self.assertNotIn("secrets.NUGET_API_KEY", self.text)
+        self.assertNotIn("secrets.NUGET_KEY", self.text)
+
+    def test_fail_closed_attestation_and_package_verification_before_login(self):
+        self.assertIn("if: vars.STABLE_PUBLISH_MODE == 'environment'", self.publish.split("runs-on:")[0])
+        self.assertIn('"$PUBLISH_MODE" != "environment"', self.build)
+        self.assertLess(self.build.index("STABLE_PUBLISH_MODE"), self.build.index("actions/checkout"))
+        self.assertLess(self.publish.index("Verify the downloaded package set"), self.publish.index("NuGet/login@"))
+        self.assertLess(self.publish.index("Download packages"), self.publish.index("Verify the downloaded package set"))
 
 
 class AssertPackagesTests(unittest.TestCase):

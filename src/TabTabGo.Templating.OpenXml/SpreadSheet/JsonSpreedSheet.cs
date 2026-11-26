@@ -50,6 +50,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new ArgumentException("$.Workbook.Worksheet.SheetData.Rows is required and must be an array (use an empty array for no rows).", "json");
             }
 
+            ValidateWorksheetShape(json);
+
             using SpreadsheetDocument
                 document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
             WorkbookPart workbookPart = document.AddWorkbookPart();
@@ -396,6 +398,30 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             return UInt32Value.FromUInt32(0);
         }
 
+        /// <summary>Requires every column, row and cell to be an object (and <c>Columns</c> and <c>Cells</c> to be arrays) so that a workbook of the wrong shape fails as <see cref="ArgumentException"/> before anything is written. A JSON <c>null</c> <c>Cells</c> is "not given".</summary>
+        private static void ValidateWorksheetShape(JObject json)
+        {
+            var columns = json.SelectToken("$.Workbook.Worksheet.Columns");
+            if (columns != null && columns.Type != JTokenType.Null && (!(columns is JArray columnArray) || columnArray.Any(column => !(column is JObject))))
+            {
+                throw new ArgumentException("$.Workbook.Worksheet.Columns must be an array of objects.", "json");
+            }
+
+            foreach (var row in (JArray)json.SelectToken("$.Workbook.Worksheet.SheetData.Rows")!)
+            {
+                if (!(row is JObject jRow))
+                {
+                    throw new ArgumentException("Every entry of $.Workbook.Worksheet.SheetData.Rows must be an object.", "json");
+                }
+
+                var cells = jRow["Cells"];
+                if (cells != null && cells.Type != JTokenType.Null && (!(cells is JArray cellArray) || cellArray.Any(cell => !(cell is JObject))))
+                {
+                    throw new ArgumentException("The Cells of a row must be an array of objects.", "json");
+                }
+            }
+        }
+
         private static List<uint> ValidateSheets(JToken? jSheets)
         {
             if (jSheets is JContainer container && container.Count > 255)
@@ -409,6 +435,12 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", "json");
             }
 
+            // a wrong JSON shape is the caller's data error: ArgumentException, never the InvalidOperationException/InvalidCastException Json.NET raises when it is indexed (messages name the path only, never a value)
+            if (!(jSheets is JArray) || sheets.Any(sheet => !(sheet is JObject)))
+            {
+                throw new ArgumentException("$.Workbook.Sheets must be an array of objects.", "json");
+            }
+
             if (sheets.Count > 255)
             {
                 throw new ArgumentException("The workbook may define at most 255 sheets.", "json");
@@ -419,6 +451,11 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var sheet in sheets)
             {
+                if (sheet["Name"] is JContainer)
+                {
+                    throw new ArgumentException("A sheet name must be text.", "json");
+                }
+
                 var name = (string?)sheet["Name"];
                 if (string.IsNullOrWhiteSpace(name) || name.Length > 31 || name.IndexOfAny(InvalidSheetNameChars) >= 0
                     || name[0] == '\'' || name[name.Length - 1] == '\'' || name.Equals("History", StringComparison.OrdinalIgnoreCase)
