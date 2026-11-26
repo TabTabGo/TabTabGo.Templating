@@ -2,6 +2,14 @@
 
 Release line 8 (.NET 8). Spec and decisions: `tabtabgo/docs/templating-modernization/` in the ttg-workspace.
 
+## 8.0.5
+
+Backport of the S-13 parse guard from v10/v11 (additive).
+
+### Added
+- `TemplatingOptions.MaxNestingDepth` (default 100, validated: at least 1). `RenderString` and template files count block nesting over DotLiquid's own tokens before `Template.Parse`; a deeper template throws `DotLiquid.Exceptions.SyntaxException` naming `MaxNestingDepth` instead of overflowing the stack (an uncatchable process crash below 60 KB of template text). The parse runs on a thread whose stack is sized from the limit. The template-file cache key includes the limit.
+- The rest of the v8 limits statement is unchanged: no iteration cap, render time-out, output cap or template size cap on this line (use v10 or v11).
+
 ## 8.0.4
 
 Security backport for the .NET 8 line: `AppSetting` opt-in, confined includes, dynamic-LINQ restrictions (`FilterBy`/`FilterByPrefix`), regex and XML bounds, per-render file system and context, safe template cache, OpenXml

@@ -19,6 +19,7 @@ public class TemplatingOptionsTests
         Assert.Empty(options.AppSettings);
         Assert.Equal(TimeSpan.FromMilliseconds(200), options.RegexTimeout);
         Assert.Equal(10_000_000, options.MaxXmlCharacters);
+        Assert.Equal(100, options.MaxNestingDepth);
         Assert.Equal("TabTabGo.Templating", TemplatingOptions.SectionName);
     }
 

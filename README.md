@@ -15,7 +15,7 @@ and can be referenced together.
 
 | Line | Branch | Target | Status |
 |---|---|---|---|
-| v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport: AppSetting opt-in, confined includes, regex time-out, DTD-free XML, per-render file system, safe template cache, OpenXml fixes). .NET 8 support ends 2026-11-10 |
+| v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport: AppSetting opt-in, confined includes, regex time-out, DTD-free XML, per-render file system, safe template cache, OpenXml fixes; 8.0.5 adds the `MaxNestingDepth` parse guard). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.0` | net10.0 | planned LTS line |
 | v11 | `releases/v11.0.x/v11.0.0` | net11.0 | planned, pre-release until .NET 11 GA |
 
@@ -56,6 +56,10 @@ Pack locally without publishing:
 ```bash
 dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.3 -o out
 ```
+
+## Release notes 8.0.5
+
+**TabTabGo.Templating 8.0.5 -- parse-depth guard (S-13).** DotLiquid's parser recurses once per nested block, so a template string of a few tens of kilobytes (thousands of nested `{% if %}`) overflows the stack and ends the process; the crash cannot be caught. 8.0.5 adds `TemplatingOptions.MaxNestingDepth` (default 100, at least 1; additive, same name and default as v10/v11): `RenderString` and file templates are scanned over DotLiquid's own tokens before parsing, and a template that nests blocks deeper throws `DotLiquid.Exceptions.SyntaxException` naming `MaxNestingDepth`. The parse then runs on a thread whose stack is sized from the limit. No public API is removed or changed; the other limits listed under 8.0.4 are still not on this line. The three limit exceptions of v10/v11 do not exist on v8.
 
 ## Release notes 8.0.4
 

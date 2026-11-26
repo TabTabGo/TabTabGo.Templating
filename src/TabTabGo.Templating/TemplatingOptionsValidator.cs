@@ -30,6 +30,11 @@ namespace TabTabGo.Templating
                 throw new ArgumentOutOfRangeException(nameof(options), "MaxXmlCharacters must not be negative (0 = unlimited).");
             }
 
+            if (options.MaxNestingDepth < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(options), "MaxNestingDepth must be at least 1.");
+            }
+
             return options;
         }
     }
