@@ -1,15 +1,18 @@
 """Self tests for the release scripts. Run: python3 -m unittest discover .github/scripts"""
 import contextlib
+import http.client
 import io
 import json
 import re
 import tempfile
 import unittest
+import urllib.error
 import unittest.mock
 import zipfile
 from pathlib import Path
 
 import assert_packages
+import apicompat
 import release_guards
 import vuln_gate
 
@@ -212,6 +215,128 @@ class LocalPinTests(unittest.TestCase):
         (root / "Directory.Packages.props").write_text("<Project><oops")
         with self.assertRaises(release_guards.GuardError):
             release_guards.check_pins_match_release_kind(root, False)
+
+
+class ApiCompatTests(unittest.TestCase):
+    def test_semver_key_orders_versions_numerically_and_prereleases_below_releases(self):
+        ordered = ["10.0.0-rc.1", "10.0.0-rc.2", "10.0.0-rc.10", "10.0.0", "10.0.9", "10.0.10", "11.0.0-preview.3.26200.1", "11.0.0-rc.1.2", "11.0.0"]
+        self.assertEqual(ordered, sorted(reversed(ordered), key=apicompat.semver_key))
+        self.assertGreater(apicompat.semver_key("10.0.10"), apicompat.semver_key("10.0.9"))
+        self.assertGreater(apicompat.semver_key("11.0.0"), apicompat.semver_key("11.0.0-rc.9"))
+
+    def test_framework_reference_picks_the_newest_pack_numerically_and_prefers_ga_over_preview(self):
+        root = Path(tempfile.mkdtemp())
+        for version in ("10.0.9", "10.0.10", "10.0.10-rc.2", "11.0.0-preview.1.1", "11.0.0-rc.1.2", "11.0.0"):
+            (root / "packs" / "Microsoft.NETCore.App.Ref" / version / "ref" / ("net11.0" if version.startswith("11") else "net10.0")).mkdir(parents=True)
+        (root / "packs" / "Microsoft.NETCore.App.Ref" / "stray-file").write_text("x")
+        self.assertTrue(apicompat.framework_reference("net10.0", [str(root)]).endswith("10.0.10/ref/net10.0"))
+        self.assertTrue(apicompat.framework_reference("net11.0", [str(root)]).endswith("11.0.0/ref/net11.0"))
+
+    def test_declared_dependencies_come_from_the_lock_files_without_projects_or_tabtabgo_packages(self):
+        root = Path(tempfile.mkdtemp())
+        for name, entries in {
+            "A": {"DotLiquid": {"type": "Direct", "resolved": "2.3.260"}, "TabTabGo.Core": {"type": "Direct", "resolved": "10.0.0"}, "Other": {"type": "Project"}},
+            "B": {"DotLiquid": {"type": "Transitive", "resolved": "2.3.9"}, "Newtonsoft.Json": {"type": "Direct", "resolved": "13.0.4"}},
+        }.items():
+            (root / "src" / name).mkdir(parents=True)
+            (root / "src" / name / "packages.lock.json").write_text(json.dumps({"version": 2, "dependencies": {"net11.0": entries}}))
+        self.assertEqual({"DotLiquid": "2.3.260", "Newtonsoft.Json": "13.0.4"}, apicompat.declared_dependencies(root))
+
+    def test_package_references_skip_stale_entries_files_and_unknown_packages(self):
+        cache = Path(tempfile.mkdtemp())
+        (cache / "dotliquid" / "2.3.260" / "lib" / "net10.0").mkdir(parents=True)
+        (cache / "dotliquid" / "2.3.999" / "lib" / "net11.0").mkdir(parents=True)  # a stale, undeclared version is never picked
+        (cache / "tabtabgo.templating").mkdir()
+        (cache / "somefile").write_text("x")
+        found = apicompat.package_references({"DotLiquid": "2.3.260", "Missing": "1.0.0", "Newtonsoft.Json": "13.0.4"}, ["net11.0", "net10.0"], cache)
+        self.assertEqual([str(cache / "dotliquid" / "2.3.260" / "lib" / "net10.0")], found)
+
+    def test_preference_never_looks_at_a_newer_framework_than_the_side_has(self):
+        self.assertEqual(["net10.0", "net9.0", "net8.0", "netstandard2.1", "netstandard2.0"], apicompat.preference("net10.0"))
+        self.assertNotIn("net11.0", apicompat.preference("net10.0"))
+
+    def test_a_missing_baseline_skips_only_that_package(self):
+        present = {"TabTabGo.Templating": Path("a"), "TabTabGo.Templating.OpenXml": Path("c")}
+        found, missing = apicompat.collect_baselines(lambda package_id: present.get(package_id), allow_missing=True)
+        self.assertEqual(["TabTabGo.Templating.Dotliquid"], missing)
+        self.assertEqual({"TabTabGo.Templating", "TabTabGo.Templating.OpenXml"}, set(found))
+
+    def test_a_missing_base_baseline_skips_the_packages_that_depend_on_it(self):
+        present = {"TabTabGo.Templating.Dotliquid": Path("b"), "TabTabGo.Templating.OpenXml": Path("c")}
+        found, missing = apicompat.collect_baselines(lambda package_id: present.get(package_id), allow_missing=True)
+        self.assertEqual({}, found)
+        self.assertEqual(3, len(set(missing)))
+
+    def test_without_allow_missing_the_caller_sees_the_missing_package(self):
+        found, missing = apicompat.collect_baselines(lambda package_id: None if package_id.endswith("OpenXml") else Path("x"), allow_missing=False)
+        self.assertEqual(["TabTabGo.Templating.OpenXml"], missing)
+
+    def test_fetch_retries_a_transient_error_three_times_and_then_reports_it(self):
+        calls = []
+        sleeps = []
+
+        def failing(url, destination):
+            calls.append(url)
+            raise urllib.error.URLError("temporary failure")
+
+        with unittest.mock.patch("urllib.request.urlretrieve", failing), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=sleeps.append)
+        self.assertEqual(3, len(calls))
+        self.assertEqual([1, 2], sleeps)
+        self.assertIn("not a missing baseline", str(raised.exception))
+
+    def test_fetch_retries_a_connection_cut_mid_body_and_other_non_oserror_failures(self):
+        for failure in (http.client.IncompleteRead(b"ab", 10), http.client.RemoteDisconnected("closed"), EOFError("short")):
+            with self.subTest(failure=type(failure).__name__):
+                results = [failure, failure, None]
+                sleeps = []
+
+                def flaky(url, destination):
+                    outcome = results.pop(0)
+                    if outcome is not None:
+                        raise outcome
+                    Path(destination).write_bytes(b"ok")
+
+                with unittest.mock.patch("urllib.request.urlretrieve", flaky), contextlib.redirect_stdout(io.StringIO()):
+                    package = apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=sleeps.append)
+                self.assertIsNotNone(package)
+                self.assertEqual([1, 2], sleeps)
+
+    def test_fetch_gives_up_after_three_cut_connections_with_a_plain_message(self):
+        def cut(url, destination):
+            raise http.client.IncompleteRead(b"", 5)
+
+        with unittest.mock.patch("urllib.request.urlretrieve", cut), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=lambda s: None)
+        self.assertIn("could not download", str(raised.exception))
+
+    def test_unpack_skips_entries_with_dot_dot_segments(self):
+        work = Path(tempfile.mkdtemp())
+        package = work / "p.nupkg"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("lib/net10.0/A.dll", "good")
+            archive.writestr("lib/net10.0/../../../escape.dll", "bad")
+            archive.writestr("lib/net10.0/..\\..\\escape2.dll", "bad")
+            archive.writestr("lib/net10.0/sub/../B.dll", "bad")
+        target = work / "out"
+
+        folder = apicompat.unpack(package, "net10.0", target)
+
+        self.assertEqual(["A.dll"], sorted(p.name for p in folder.rglob("*.dll")))
+        self.assertFalse(list(work.rglob("escape*.dll")))
+
+    def test_fetch_treats_404_as_missing_without_retrying(self):
+        calls = []
+
+        def not_found(url, destination):
+            calls.append(url)
+            raise urllib.error.HTTPError(url, 404, "Not Found", None, None)
+
+        with unittest.mock.patch("urllib.request.urlretrieve", not_found):
+            self.assertIsNone(apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=lambda s: None))
+        self.assertEqual(1, len(calls))
 
 
 class PinFormTests(unittest.TestCase):

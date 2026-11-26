@@ -3,6 +3,15 @@
 All notable changes per release line. The line is the major version: 8 = .NET 8, 10 = .NET 10, 11 = .NET 11. Spec and decisions:
 `tabtabgo/docs/templating-modernization/` in the ttg-workspace (row ids such as S-3 or X-2 refer to its section 6).
 
+## 11.0.0
+
+Target: net11.0 on SDK 11.0.100 (GA); Microsoft.Extensions 11.0.0 (GA). No API change compared with 10.0.0: ApiCompat in assembly mode (`.github/scripts/apicompat.py`) compares
+the packed assemblies with the published 10.0.0 ones; package validation has no baseline (it cannot compare net10.0 with net11.0). `Microsoft.Extensions.Options`,
+`DependencyInjection.Abstractions` and `Configuration.Abstractions` are no longer package references: they ship in the net11.0 shared framework (NU1510).
+Lock files are committed and restore is always `--locked-mode`.
+Verified by running it: the packed packages were referenced from a plain `net11.0` console app (`Microsoft.NETCore.App` only, plus the consumer's own `Microsoft.Extensions.DependencyInjection`), which registered the options through `AddTabTabGoTemplating`, rendered a Liquid template and wrote a workbook; `Microsoft.Extensions.Options`, `DependencyInjection.Abstractions` and `Configuration.Abstractions` were resolved from the shared framework (they are not copied to the output), while `Configuration`, `.Binder` and `.Json` come with the package.
+ApiCompat script fixes: the reference set is the declared dependencies from the lock files (no stale packages from the shared cache, no `TabTabGo.*`), versions are compared as versions (10.0.10 above 10.0.9, a release above its preview), `--allow-missing-baseline` skips only the packages whose baseline is missing, and a transient nuget.org error is retried three times. The release order (v10.0.0 published before a v11 tag) is documented in the README.
+
 ## 10.0.0
 
 Target: net10.0. Includes every 8.0.4 fix unchanged (fresh context per render, regex time-outs that propagate, include confinement, `AppSetting` opt-in, safe XML, JSON workbook
@@ -59,6 +68,7 @@ mode, no temp files). No public API of 8.0.4 was removed or changed.
 - Tests that returned silently (as root or on Windows, or when symbolic links or named pipes cannot be created) now skip visibly with a reason (`Assert.Skip`).
 - Behaviour change for hosts that use the public `EnhancedLocalFileSystem` directly: `ReadTemplateFile` throws a `SyntaxException` for a partial nested deeper than `MaxNestingDepth` (the render's option inside an engine render, the default 100 outside one). A host-assigned `EnhancedLocalFileSystem` is checked; other `IFileSystem` types are not.
 - `{% literal %}` bodies are skipped by the nesting scan like `raw` and `comment` (the scan counted the blocks inside a literal and refused valid templates).
+- Release tooling: `apicompat.py` retries a baseline download that is cut mid-body (`HTTPException`, including `IncompleteRead`) or ended early (`EOFError`) as well as the usual network errors, and skips package entries whose path contains a `..` segment.
 - Release guard: the stable-tag pin check reads single-quoted attributes and the `<Version>` element form, ignores comments, and resolves `$(Property)` references (every declared value of a property counts, including later and conditional declarations) before looking for pre-release and `-local` versions; any SemVer label is a pre-release, in any case, and a version that still contains `$(` after resolution blocks a stable tag (with its own message for a cyclic or self-appending property and for an undeclared one). Floating versions (`2.3.260-*`) count as pre-release and build metadata (`+2026-abc`) does not; every reference is expanded in each pass; when the candidate or length cap drops values the check fails on every tag instead of passing on a partial list.
 - Release guard and publish workflow: only stable `vMAJOR.MINOR.PATCH` tags are released. Any pre-release suffix (`-rc`, `-ci`, `-alpha`, `-beta`, ...) or build metadata is refused by `release_guards.py` ("only stable vMAJOR.MINOR.PATCH tags are released"); the `v*.*.*-*` trigger pattern, the `prerelease` job output and the `nuget-prerelease` environment path are removed from `publish.yml` (the publish job always uses `nuget-stable`). The pre-release pin detection is unchanged: a pre-release dependency pin still blocks a release.
 

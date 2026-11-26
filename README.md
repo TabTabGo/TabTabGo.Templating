@@ -1,5 +1,7 @@
 # TabTabGo.Templating
 
+> **v11 line (`11.0.0`).** Same code and API as 10.0.0 on net11.0, SDK 11.0.100 and Microsoft.Extensions 11.0.0 (GA).
+
 Template rendering for TabTabGo products: Liquid text/HTML (DotLiquid) and Excel workbooks (Open XML).
 
 | Package | Purpose |
@@ -17,13 +19,13 @@ referenced together. None of the packages depends on `TabTabGo.Core` (ADR 0002):
 |---|---|---|---|
 | v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.4 is the security backport). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.N` | net10.0 | LTS line (this branch): every defect of spec section 6 fixed, sandboxing, options + DI, goldens, coverage gates |
-| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | stable `11.0.0` once .NET 11 is GA; built and verified on CI only until a .NET 11 SDK is installed |
+| v11 | `releases/v11.0.x/v11.0.N` | net11.0 | stable (`11.0.0`) (this branch); built and tested on SDK 11.0.100 |
 
 Design and decisions: `tabtabgo/docs/templating-modernization/` in the ttg-workspace (spec and ADRs 0001-0005).
 
 ## Building and testing
 
-The SDK is pinned by `global.json` (10.0.401, roll forward to the latest patch) and the tests run on Microsoft Testing Platform
+The SDK is pinned by `global.json` (11.0.100, `latestPatch`; Microsoft.Extensions 11.0.0) and the tests run on Microsoft Testing Platform
 (xunit.v3, coverlet.MTP, NSubstitute; ADR 0005). Packages are versioned centrally in `Directory.Packages.props` and restored with
 `packages.lock.json` files (`--locked-mode` on CI).
 
@@ -68,8 +70,15 @@ Packages are published **only from tags**. There is no publish from `master` or 
 
 If a publish run fails part-way, do not re-run it: re-runs are refused. Fix the cause, bump the patch version and tag again.
 
-Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=10.0.0 -o out`. Package validation compares with 6.0.5
-(`CompatibilitySuppressions.xml` lists the dropped target frameworks).
+Pack locally without publishing: `dotnet pack TabTabGo.Templating.sln -c Release -p:Version=11.0.0 -o out`. Package validation has no baseline on this line; the API surface is compared with the previous line by ApiCompat in assembly mode
+(`python3 .github/scripts/apicompat.py out net10.0 net11.0 --baseline-version 10.0.0`, tool pinned in `.config/dotnet-tools.json`, `dotnet tool restore`). **Order of releases:** the ApiCompat step of `publish.yml` compares with the published `10.0.0` and fails the release when that version is not on nuget.org, so a v11 tag cannot be released before v10.0.0 is published (a transient nuget.org error is retried three times and then reported as such, not as a missing baseline). The reference assemblies are the declared dependencies from the committed lock files and the newest installed .NET reference pack, never the whole NuGet cache.
+
+## Release notes 11.0.0
+
+No API or behaviour change compared with 10.0.0: the target framework is net11.0, `Microsoft.Extensions.*` are the 11.0.0 GA builds, the SDK is
+`11.0.100`, and ApiCompat compares the assemblies with 10.0.0. `Microsoft.Extensions.Options`, `DependencyInjection.Abstractions` and `Configuration.Abstractions` come from the
+net11.0 shared framework instead of packages. DotLiquid, Humanizer, System.Linq.Dynamic.Core, Open XML SDK and Newtonsoft.Json have no net11 builds and resolve to
+their net10/net8 assets; the test suite proves the combination (run on net11.0 with SDK 11.0.100).
 
 ## Release notes 10.0.0
 
