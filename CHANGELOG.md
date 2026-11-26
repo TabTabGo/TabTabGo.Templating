@@ -13,6 +13,7 @@ Backport of the S-13 parse guard from v10/v11 (additive).
 - `{% literal %}` bodies are skipped by the nesting scan like `raw` and `comment`; without this the scan counted the blocks inside a literal and refused templates stock DotLiquid parses (a regression against 8.0.4).
 - OpenXml JSON workbook: a workbook of the wrong JSON shape (`Workbook.Sheets`, `Columns`, `Rows` or `Cells` not an array, an entry that is not an object, an object or array sheet `Name`) is an `ArgumentException` instead of Json.NET's `InvalidOperationException`/`InvalidCastException`; messages name the path, never a value; nothing is written. A JSON `null` `Cells` is "not given".
 - CI scripts: `vuln_gate.py` reads the report past a warning line that contains `{` and exits 2 when no report is readable (same as v10/v11).
+- Release guard and publish workflow: only stable `vMAJOR.MINOR.PATCH` tags are released. Any pre-release suffix (`-rc`, `-ci`, `-alpha`, `-beta`, ...) or build metadata is refused by `release_guards.py` ("only stable vMAJOR.MINOR.PATCH tags are released"); the `v*.*.*-*` trigger pattern, the `prerelease` job output and the `nuget-prerelease` environment path are removed from `publish.yml` (the publish job always uses `nuget-stable`). The pre-release pin detection is unchanged: a pre-release dependency pin still blocks a release.
 - The rest of the v8 limits statement is unchanged: no iteration cap, render time-out, output cap or template size cap on this line (use v10 or v11).
 
 ## 8.0.4
