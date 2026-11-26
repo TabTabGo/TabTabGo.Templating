@@ -22,13 +22,31 @@ class ParseTagTests(unittest.TestCase):
         info = release_guards.parse_tag("v8.0.3")
         self.assertEqual(("8.0.3", "8", False), (info["version"], info["major"], info["prerelease"]))
 
-    def test_rc_tag_is_prerelease(self):
-        info = release_guards.parse_tag("v10.0.0-rc.1")
-        self.assertTrue(info["prerelease"])
-        self.assertEqual("10.0.0", info["core"])
+    def test_prerelease_tags_and_build_metadata_are_refused_with_a_clear_message(self):
+        for tag in ("v10.0.0-rc.1", "v11.0.0-rc.1", "v8.0.5-beta.1", "v8.0.5-ci.7", "v8.0.5-alpha.1", "v10.0.0+x", "v10.0.0-rc.1+x", "v8.0.3-foo", "v8.0.3-rc"):
+            with self.subTest(tag=tag):
+                with self.assertRaises(release_guards.GuardError) as raised:
+                    release_guards.parse_tag(tag)
+                self.assertIn("only stable vMAJOR.MINOR.PATCH tags are released", str(raised.exception))
+
+    def test_stable_tags_pass_and_report_no_prerelease(self):
+        for tag, core in (("v10.0.0", "10.0.0"), ("v11.0.0", "11.0.0"), ("v8.0.5", "8.0.5")):
+            with self.subTest(tag=tag):
+                info = release_guards.parse_tag(tag)
+                self.assertEqual((core, False), (info["core"], info["prerelease"]))
+                self.assertEqual(core, info["version"])
+
+    def test_main_refuses_a_prerelease_tag_before_any_other_check(self):
+        for tag in ("v11.0.0-rc.1", "v8.0.5-beta.1", "v10.0.0+x"):
+            with self.subTest(tag=tag):
+                with contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()) as out:
+                    code = release_guards.main([tag, "0" * 40, "--offline", "--root", tempfile.mkdtemp()])
+                self.assertEqual(1, code)
+                self.assertIn("only stable", err.getvalue())
+                self.assertEqual("", out.getvalue())
 
     def test_rejects_bad_tags(self):
-        for tag in ("8.0.3", "v8.0", "v8.0.3-foo", "v8.0.3+meta", "v8.0.3-rc",
+        for tag in ("8.0.3", "v8.0", "v8.0.3-foo", "v8.0.3+meta", "v8.0.3-rc", "v8.0.3-",
                     "v8.0.3\n", "v08.0.3", "v8.00.3", "v8.0.03", "v8.0.3-rc.01", "v\u0668.0.3", "v8.0.3-rc.\u0661"):
             with self.subTest(tag=tag):
                 with self.assertRaises(release_guards.GuardError):
