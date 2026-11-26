@@ -117,6 +117,29 @@ class VulnGateFailClosedTests(unittest.TestCase):
             self.assertNotEqual(0, vuln_gate.main())
 
 
+class VulnGateExtractionTests(unittest.TestCase):
+    CLEAN = '{"version": 1, "sources": ["s"], "projects": [{"path": "a"}]}'
+
+    def _run(self, text):
+        with unittest.mock.patch("sys.stdin", io.StringIO(text)), contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+            return vuln_gate.main()
+
+    def test_a_warning_line_with_a_brace_before_the_report_does_not_break_a_clean_audit(self):
+        self.assertEqual(0, self._run("warning NU1900: could not read {feed} metadata\n" + self.CLEAN))
+        self.assertEqual(0, self._run("{ not json\n" + self.CLEAN))
+
+    def test_a_non_dict_vulnerability_entry_is_a_finding(self):
+        report = {"sources": ["s"], "projects": [{"path": "a", "frameworks": [{"framework": "net10.0", "topLevelPackages": [
+            {"id": "X", "resolvedVersion": "1.0.0", "vulnerabilities": ["oops", 3]}]}]}]}
+        self.assertEqual(1, self._run(json.dumps(report)))
+        self.assertEqual(1, len(vuln_gate.find_vulnerabilities(report)))
+
+    def test_no_parseable_report_fails_closed(self):
+        for text in ("", "   ", "no json here", "{ broken", "[1, 2]", '{"unrelated": 1}', "warning {x}\nstill nothing"):
+            with self.subTest(text=text):
+                self.assertEqual(2, self._run(text))
+
+
 class AssertPackagesTests(unittest.TestCase):
     def _write(self, directory, package_id, version, dep_version, tfm="net8.0"):
         dep = "" if package_id == "TabTabGo.Templating" else f'<dependency id="TabTabGo.Templating" version="{dep_version}" />'

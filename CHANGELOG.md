@@ -8,6 +8,9 @@ Backport of the S-13 parse guard from v10/v11 (additive).
 
 ### Added
 - `TemplatingOptions.MaxNestingDepth` (default 100, validated: at least 1). `RenderString` and template files count block nesting over DotLiquid's own tokens before `Template.Parse`; a deeper template throws `DotLiquid.Exceptions.SyntaxException` naming `MaxNestingDepth` instead of overflowing the stack (an uncatchable process crash below 60 KB of template text). The parse runs on a thread whose stack is sized from the limit. The template-file cache key includes the limit.
+- Partials read by `include`/`extends` through the render's file system (`TemplatesPath`, or the directory of the rendered file) are scanned against `MaxNestingDepth` before DotLiquid parses them; a deeper partial fails the include with a `SyntaxException` naming the option (DotLiquid may render it inline as its error text). A file system the host assigns to `Template.FileSystem` is not wrapped.
+- OpenXml JSON workbook: a workbook of the wrong JSON shape (`Workbook.Sheets`, `Columns`, `Rows` or `Cells` not an array, an entry that is not an object, a non-text sheet `Name`) is an `ArgumentException` instead of Json.NET's `InvalidOperationException`/`InvalidCastException`; messages name the path, never a value; nothing is written. A JSON `null` `Cells` is "not given".
+- CI scripts: `vuln_gate.py` reads the report past a warning line that contains `{` and exits 2 when no report is readable (same as v10/v11).
 - The rest of the v8 limits statement is unchanged: no iteration cap, render time-out, output cap or template size cap on this line (use v10 or v11).
 
 ## 8.0.4
