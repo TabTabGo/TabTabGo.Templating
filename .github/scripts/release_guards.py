@@ -130,7 +130,7 @@ def declared_version(root: Path) -> str:
 
 
 def check_declared_version(root: Path, core: str) -> None:
-    """Step 5: <Version> in Directory.Build.props equals the tag without its pre-release suffix."""
+    """Step 5: <Version> in Directory.Build.props equals the tag (tags are stable vMAJOR.MINOR.PATCH only)."""
     declared = declared_version(root)
     if declared != core:
         raise GuardError(f"Directory.Build.props declares Version {declared} but the tag is for {core}")
