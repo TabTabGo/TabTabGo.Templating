@@ -46,7 +46,7 @@ jobs:
           if grep -q '<TtgWarnAsError>true</TtgWarnAsError>' Directory.Build.props; then extra="-warnaserror"; fi
           dotnet build TabTabGo.Templating.sln -c Release --no-restore $extra
 
-      - name: Test with coverage (gating: 85 % lines, 75 % branches per package)
+      - name: "Test with coverage (gating: 85 % lines, 75 % branches per package)"
         run: python3 .github/scripts/run_tests.py --no-build
 
       - name: Vulnerability gate

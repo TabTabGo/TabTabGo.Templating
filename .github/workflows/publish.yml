@@ -1,6 +1,6 @@
 name: publish
 
-# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH (releases are stable; a pre-release suffix is still parsed by the guards but none is published)
+# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH (only stable versions are released: the guards refuse any pre-release suffix or build metadata)
 # from a commit on releases/vMAJOR.MINOR.x/vMAJOR.MINOR.PATCH (spec section 8.2, ADR 0001).
 # No workflow_dispatch on purpose. Authentication is nuget.org trusted publishing (OIDC): no long-lived key is stored.
 
@@ -8,7 +8,6 @@ on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -23,7 +22,6 @@ jobs:
     timeout-minutes: 30
     outputs:
       version: ${{ steps.guards.outputs.version }}
-      prerelease: ${{ steps.guards.outputs.prerelease }}
     steps:
       - name: Refuse re-runs and actor mismatches (a re-run keeps the original actor; tag again instead)
         env:
@@ -64,7 +62,7 @@ jobs:
           if grep -q '<TtgWarnAsError>true</TtgWarnAsError>' Directory.Build.props; then extra="-warnaserror"; fi
           dotnet build TabTabGo.Templating.sln -c Release --no-restore -p:Version="$VERSION" $extra
 
-      - name: Test with coverage (gating: 85 % lines, 75 % branches per package)
+      - name: "Test with coverage (gating: 85 % lines, 75 % branches per package)"
         run: python3 .github/scripts/run_tests.py --no-build
 
       - name: Vulnerability gate
@@ -98,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Stable tags wait for the required reviewers of the nuget-stable environment.
-    environment: ${{ needs.build.outputs.prerelease == 'true' && 'nuget-prerelease' || 'nuget-stable' }}
+    environment: nuget-stable
     permissions:
       id-token: write # the only job allowed to request an OIDC token
       contents: read

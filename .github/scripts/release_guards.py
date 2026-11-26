@@ -6,7 +6,7 @@ Every guard exits non-zero with a clear message. Run from the repository root:
     release_guards.py <tag> <commit-sha> [--offline]
 
 ``--offline`` skips the nuget.org "already published" query (used by the self tests and local dry runs).
-On success it prints ``version=...`` and ``prerelease=...`` lines suitable for ``$GITHUB_OUTPUT``.
+On success it prints a ``version=...`` line suitable for ``$GITHUB_OUTPUT``. Only stable vMAJOR.MINOR.PATCH tags pass.
 """
 from __future__ import annotations
 
@@ -22,10 +22,7 @@ from pathlib import Path
 
 PACKAGE_IDS = ("TabTabGo.Templating", "TabTabGo.Templating.Dotliquid", "TabTabGo.Templating.OpenXml")
 _NUMBER = r"(?:0|[1-9][0-9]*)"  # no leading zeros
-TAG_VERSION = re.compile(
-    rf"(?P<core>(?P<major>{_NUMBER})\.(?P<minor>{_NUMBER})\.(?P<patch>{_NUMBER}))(?P<pre>-(?:rc|ci|alpha|beta)\.{_NUMBER})?",
-    re.ASCII,
-)
+TAG_VERSION = re.compile(rf"(?P<core>(?P<major>{_NUMBER})\.(?P<minor>{_NUMBER})\.(?P<patch>{_NUMBER}))", re.ASCII)
 TFM_MAJOR = re.compile(r"net(?P<major>[0-9]+)\.0", re.ASCII)
 
 
@@ -34,20 +31,22 @@ class GuardError(Exception):
 
 
 def parse_tag(tag: str) -> dict[str, str | bool]:
-    """Step 2: version from the tag. Releases are stable (vMAJOR.MINOR.PATCH) and the project publishes no -rc tags; a pre-release suffix is still parsed so that a mistaken pre-release tag is judged by the pre-release rules, never waved through."""
+    """Step 2: version from the tag. Only stable vMAJOR.MINOR.PATCH tags are released: any pre-release suffix (-rc, -ci, -alpha, -beta, ...) or build metadata (+...) is refused."""
     if not tag.startswith("v"):
         raise GuardError(f"tag '{tag}' does not start with 'v'")
     version = tag[1:]
     match = TAG_VERSION.fullmatch(version)
     if not match:
-        raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH (releases are stable versions)")
+        if TAG_VERSION.match(version) and version[TAG_VERSION.match(version).end():][:1] in ("-", "+"):
+            raise GuardError(f"tag '{tag}' has a pre-release suffix or build metadata: only stable vMAJOR.MINOR.PATCH tags are released")
+        raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH (only stable vMAJOR.MINOR.PATCH tags are released)")
     return {
         "version": version,
         "core": match.group("core"),
         "major": match.group("major"),
         "minor": match.group("minor"),
         "patch": match.group("patch"),
-        "prerelease": match.group("pre") is not None,
+        "prerelease": False,  # kept for callers of the dictionary: a pre-release tag no longer parses
     }
 
 
@@ -316,7 +315,6 @@ def main(argv: list[str]) -> int:
         print(f"::error::{error}", file=sys.stderr)
         return 1
     print(f"version={info['version']}")
-    print(f"prerelease={'true' if info['prerelease'] else 'false'}")
     return 0
 
 
