@@ -2,7 +2,7 @@
 
   <!-- Shared version and package metadata (ADR 0001). TFM and per-project settings stay in each csproj on the v8 line. -->
   <PropertyGroup>
-    <Version>8.0.4</Version>
+    <Version>8.0.5</Version>
     <AssemblyVersion>8.0.0.0</AssemblyVersion>
     <FileVersion>$([System.Text.RegularExpressions.Regex]::Match('$(Version)', '^[0-9]+\.[0-9]+\.[0-9]+').Value).$([MSBuild]::Modulo($([MSBuild]::ValueOrDefault('$(GITHUB_RUN_NUMBER)', '0')), 65536))</FileVersion>
     <Authors>TabTabGo</Authors>

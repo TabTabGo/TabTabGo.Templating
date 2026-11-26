@@ -10,6 +10,7 @@ using System;
 using System.Globalization;
 using Newtonsoft.Json.Linq;
 using TabTabGo.Templating.Liquid.Filters;
+using TabTabGo.Templating.Liquid.Internal;
 using TabTabGo.Templating.Liquid.Tags;
 using System.Runtime.CompilerServices;
 
@@ -20,8 +21,8 @@ namespace TabTabGo.Templating.Liquid
         private static object _lock = new object();
         private static bool _isIinitialized = false;
         private readonly Dictionary<int, Dictionary<object, object>> _hashCache = new Dictionary<int, Dictionary<object, object>>();
-        private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>> _templateCache =
-            new ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>>();
+        private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc, int MaxNestingDepth), Lazy<Template>> _templateCache =
+            new ConcurrentDictionary<(string Path, DateTime LastWriteUtc, int MaxNestingDepth), Lazy<Template>>();
         private static long _parseCount;
         public override string EngineName => "Liquid";
 
@@ -87,7 +88,7 @@ namespace TabTabGo.Templating.Liquid
 
             var fullPath = Path.GetFullPath(templatePath);
             return File.Exists(fullPath)
-                && _templateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath)), out var cached)
+                && _templateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath), _options.MaxNestingDepth), out var cached)
                 && cached.IsValueCreated;
         }
 
@@ -132,7 +133,7 @@ namespace TabTabGo.Templating.Liquid
         public override string RenderString(string templateString, object sourceData, string culture ="en-Us")
         {
             // Parsed per call, so nothing is shared between renders.
-            var template = Template.Parse(templateString);
+            var template = TemplateNesting.Parse(templateString, _options.MaxNestingDepth);
             var hash = HashIt(sourceData);
             var parameters = new RenderParameters(new CultureInfo(culture))
             {
@@ -164,14 +165,14 @@ namespace TabTabGo.Templating.Liquid
 
             if (!_options.CacheTemplates)
             {
-                return (ParseFile(fullPath), fullPath);
+                return (ParseFile(fullPath, _options.MaxNestingDepth), fullPath);
             }
 
             // Keyed by full path and last write time: an edited file is parsed again, and relative and absolute spellings
             // of one path share an entry (B-2).
             var lastWrite = File.GetLastWriteTimeUtc(fullPath);
-            var key = (fullPath, lastWrite);
-            var entry = _templateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path), LazyThreadSafetyMode.ExecutionAndPublication));
+            var key = (fullPath, lastWrite, _options.MaxNestingDepth);
+            var entry = _templateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path, _options.MaxNestingDepth), LazyThreadSafetyMode.ExecutionAndPublication));
 
             foreach (var stale in _templateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
             {
@@ -189,10 +190,10 @@ namespace TabTabGo.Templating.Liquid
             }
         }
 
-        private static Template ParseFile(string fullPath)
+        private static Template ParseFile(string fullPath, int maxNestingDepth)
         {
             Interlocked.Increment(ref _parseCount);
-            var template = Template.Parse(File.ReadAllText(fullPath));
+            var template = TemplateNesting.Parse(File.ReadAllText(fullPath), maxNestingDepth);
             template.MakeThreadSafe(); // the instance is shared; renders use their own Context (see Render)
             return template;
         }

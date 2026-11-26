@@ -29,7 +29,7 @@ Engines: [`TabTabGo.Templating.Dotliquid`](../TabTabGo.Templating.Dotliquid/READ
 the v8 line (F-16):** it opens a file named `appsettigs.json` (typo) and throws `FileNotFoundException`; it is fixed on
 v10. Until then bind the section yourself with `IConfiguration.GetSection("TabTabGo.Templating").Bind(...)`.
 
-## TemplatingOptions (8.0.4)
+## TemplatingOptions (8.0.5)
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -39,6 +39,7 @@ v10. Until then bind the section yourself with `IConfiguration.GetSection("TabTa
 | `RegexTimeout` | 200 ms | time-out of regular expressions run by template filters (`GetMatch`) |
 | `StylesheetRoot` | `null` | OpenXml JSON-workbook stylesheets are loaded only from here (relative: against the application base directory; default: the base directory) |
 | `MaxXmlCharacters` | 10 000 000 | size cap of XML parsed by `XPathSelect`/`XPathSelectMany` (DTDs are always rejected) |
+| `MaxNestingDepth` | 100 | deepest block nesting (`if`, `for`, custom blocks) a template may have, checked before parsing (8.0.5); a deeper template throws `DotLiquid.Exceptions.SyntaxException` naming the option. Must be at least 1 |
 
 ```csharp
 services.AddTabTabGoTemplating(configuration);                       // binds the "TabTabGo.Templating" section
