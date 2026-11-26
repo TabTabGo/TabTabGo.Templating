@@ -158,6 +158,42 @@ class VulnGateExtractionTests(unittest.TestCase):
                 self.assertEqual(2, self._run(text))
 
 
+class PublishWorkflowShapeTests(unittest.TestCase):
+    """The privileged job runs no repository code, publishes by trusted publishing only, and fails closed."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (Path(__file__).resolve().parents[1] / "workflows" / "publish.yml").read_text(encoding="utf-8")
+        cls.build, cls.publish = cls.text.split("\n  publish:\n")
+
+    def test_publish_job_checks_out_nothing_and_runs_no_repository_script(self):
+        self.assertNotIn("actions/checkout", self.publish)
+        self.assertNotIn(".github/scripts", self.publish)
+        self.assertNotIn("refs/tags", self.publish)
+        self.assertNotIn("github.ref", self.publish.replace("github.run_attempt", ""))
+
+    def test_only_the_publish_job_has_an_id_token_and_it_uses_the_stable_environment(self):
+        self.assertNotIn("id-token", self.build)
+        self.assertIn("id-token: write", self.publish)
+        self.assertIn("environment: nuget-stable", self.publish)
+        self.assertNotIn("nuget-prerelease", self.text)
+        self.assertNotIn("prerelease", self.text.replace("pre-release", ""))
+
+    def test_trusted_publishing_not_a_stored_api_key(self):
+        self.assertIn("NuGet/login@", self.publish)
+        self.assertIn("user: ${{ secrets.NUGET_USER }}", self.publish)
+        self.assertIn("steps.login.outputs.NUGET_API_KEY", self.publish)
+        self.assertNotIn("secrets.NUGET_API_KEY", self.text)
+        self.assertNotIn("secrets.NUGET_KEY", self.text)
+
+    def test_fail_closed_attestation_and_package_verification_before_login(self):
+        self.assertIn("if: vars.STABLE_PUBLISH_MODE == 'environment'", self.publish.split("runs-on:")[0])
+        self.assertIn('"$PUBLISH_MODE" != "environment"', self.build)
+        self.assertLess(self.build.index("STABLE_PUBLISH_MODE"), self.build.index("actions/checkout"))
+        self.assertLess(self.publish.index("Verify the downloaded package set"), self.publish.index("NuGet/login@"))
+        self.assertLess(self.publish.index("Download packages"), self.publish.index("Verify the downloaded package set"))
+
+
 class AssertPackagesTests(unittest.TestCase):
     def _write(self, directory, package_id, version, dep_version, tfm="net8.0"):
         dep = "" if package_id == "TabTabGo.Templating" else f'<dependency id="TabTabGo.Templating" version="{dep_version}" />'
