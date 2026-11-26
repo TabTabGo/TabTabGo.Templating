@@ -137,15 +137,65 @@ def check_declared_version(root: Path, core: str) -> None:
         raise GuardError(f"Directory.Build.props declares Version {declared} but the tag is for {core}")
 
 
-def references_local_build(path: Path) -> bool:
-    """True when a version a build resolves (a Version, VersionOverride or Include attribute, or a Version element) names a -local build; descriptions and comments do not count."""
+_PROPERTY_REFERENCE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_.\-]*)\)")
+_PRERELEASE = re.compile(r"-(rc|preview|alpha|beta)", re.ASCII)
+
+
+def _local_name(element: ET.Element) -> str:
+    return element.tag.rpartition("}")[2]
+
+
+def collect_properties(paths: list[Path]) -> dict[str, str]:
+    """Every MSBuild property declared in a PropertyGroup of the given files (first declaration wins; unreadable files are skipped here and reported by the caller)."""
+    properties: dict[str, str] = {}
+    for path in paths:
+        try:
+            root = ET.parse(path).getroot()
+        except (ET.ParseError, OSError):
+            continue
+        for group in root.iter():
+            if _local_name(group) != "PropertyGroup":
+                continue
+            for element in group:
+                name = _local_name(element)
+                if element.text and element.text.strip() and name not in properties:
+                    properties[name] = element.text.strip()
+    return properties
+
+
+def resolve_properties(value: str, properties: dict[str, str], depth: int = 8) -> str:
+    """Replaces $(Name) with the declared property value (repeatedly, so a property may name another); an undeclared name stays as written."""
+    for _ in range(depth):
+        resolved = _PROPERTY_REFERENCE.sub(lambda m: properties.get(m.group(1), m.group(0)), value)
+        if resolved == value:
+            break
+        value = resolved
+    return value
+
+
+def resolved_versions(path: Path, properties: dict[str, str] | None = None) -> list[str]:
+    """The versions a build resolves from `path`: Version and VersionOverride attributes (either quote style) and Version, VersionOverride and PackageVersion elements, with
+    $(Property) references resolved. Comments, descriptions and other text are not versions and are never read (the file is parsed as XML)."""
+    properties = properties or {}
+    versions: list[str] = []
     for element in ET.parse(path).getroot().iter():
-        for name in ("Version", "VersionOverride", "Include", "Update"):
-            if "-local" in element.attrib.get(name, ""):
+        for name in ("Version", "VersionOverride"):
+            if name in element.attrib:
+                versions.append(resolve_properties(element.attrib[name], properties))
+        if _local_name(element) in ("Version", "VersionOverride", "PackageVersion") and element.text and element.text.strip():
+            versions.append(resolve_properties(element.text.strip(), properties))
+    return versions
+
+
+def references_local_build(path: Path, properties: dict[str, str] | None = None) -> bool:
+    """True when a version a build resolves (a Version, VersionOverride or Include attribute, or a Version element, after property resolution) names a -local build; descriptions and comments do not count."""
+    properties = properties or {}
+    if any("-local" in version for version in resolved_versions(path, properties)):
+        return True
+    for element in ET.parse(path).getroot().iter():
+        for name in ("Include", "Update"):
+            if "-local" in resolve_properties(element.attrib.get(name, ""), properties):
                 return True
-        tag = element.tag.rpartition("}")[2]
-        if tag in ("Version", "VersionOverride", "PackageVersion") and "-local" in (element.text or ""):
-            return True
     return False
 
 
@@ -155,17 +205,16 @@ def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
     global_json = root / "global.json"
     if not prerelease and global_json.exists() and re.search(r'"allowPrerelease"\s*:\s*true', global_json.read_text(encoding="utf-8-sig")):
         problems.append("global.json allows a pre-release SDK")
-    for path in [root / "Directory.Packages.props", root / "Directory.Build.props", *sorted((root / "src").glob("*/*.csproj"))]:
-        if not path.exists():
-            continue
-        text = path.read_text(encoding="utf-8-sig")
+    paths = [path for path in [root / "Directory.Packages.props", root / "Directory.Build.props", *sorted((root / "src").glob("*/*.csproj"))] if path.exists()]
+    properties = collect_properties(paths)
+    for path in paths:
         try:
-            if references_local_build(path):
+            if references_local_build(path, properties):
                 problems.append(f"{path.name} references a -local build")
+            if not prerelease and any(_PRERELEASE.search(version) for version in resolved_versions(path, properties)):
+                problems.append(f"{path.name} pins a pre-release package")
         except ET.ParseError:
             problems.append(f"{path.name} is not well-formed XML")
-        if not prerelease and re.search(r'Version="[^"]*-(rc|preview|alpha|beta)[^"]*"', text):
-            problems.append(f"{path.name} pins a pre-release package")
     if problems:
         raise GuardError("; ".join(problems) + (" (a stable tag needs stable pins; tag an -rc instead)" if not prerelease else ""))
 

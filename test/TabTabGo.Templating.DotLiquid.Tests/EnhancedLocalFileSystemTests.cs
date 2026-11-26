@@ -140,7 +140,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     {
         if (OperatingSystem.IsWindows())
         {
-            return;
+            Assert.Skip("needs POSIX file permissions (Windows)");
         }
 
         var path = Path.Combine(_root, "_locked.liquid");
@@ -150,7 +150,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         {
             if (Environment.UserName == "root")
             {
-                return; // root reads everything
+                Assert.Skip("running as root: root reads every file, so the permission failure cannot be produced");
             }
 
             var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'locked'"));
@@ -387,7 +387,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
-            return;
+            Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
         }
 
         var locked = Path.Combine(_root, "locked");
@@ -418,7 +418,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
-            return;
+            Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
         }
 
         var locked = Path.Combine(_root, "locked2");

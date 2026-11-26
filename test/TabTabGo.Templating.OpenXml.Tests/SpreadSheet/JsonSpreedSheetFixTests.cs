@@ -780,7 +780,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
-            return;
+            Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
         }
 
         var file = Path.Combine(_base, "root", "noperm.xml");
@@ -1330,7 +1330,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
-            return;
+            Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
         }
 
         var locked = Path.Combine(_base, "root", "locked");

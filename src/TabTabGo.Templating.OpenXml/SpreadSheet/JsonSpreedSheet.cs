@@ -81,8 +81,15 @@ public class JsonSpreedSheet
             throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", nameof(json));
         }
 
+        // a wrong JSON shape is the caller's data error: ArgumentException, never the InvalidOperationException/InvalidCastException Json.NET raises when it is indexed (messages name the path only, never a value)
+        if (sheetsToken is not JArray || jSheets.Any(sheet => sheet is not JObject))
+        {
+            throw new ArgumentException("$.Workbook.Sheets must be an array of objects.", nameof(json));
+        }
+
         var sheetIds = ResolveSheetIds(jSheets);
         var sheetNames = ResolveSheetNames(jSheets);
+        ValidateWorksheetShape(json);
 
         using var document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
         var workbookPart = document.AddWorkbookPart();
@@ -125,6 +132,38 @@ public class JsonSpreedSheet
         }
 
         workbookPart.Workbook.Save();
+    }
+
+    /// <summary>
+    /// Requires <c>$.Workbook.Worksheet.SheetData.Rows</c> to be an array (use an empty array for no rows) and every column, row and cell to be an object, so that a workbook of
+    /// the wrong shape fails as <see cref="ArgumentException"/> before anything is written. A JSON <c>null</c> <c>Columns</c> or <c>Cells</c> is "not given".
+    /// </summary>
+    /// <param name="json">The workbook definition.</param>
+    private static void ValidateWorksheetShape(JObject json)
+    {
+        if (json.SelectToken("$.Workbook.Worksheet.SheetData.Rows") is not JArray rows)
+        {
+            throw new ArgumentException("$.Workbook.Worksheet.SheetData.Rows is required and must be an array (use an empty array for no rows).", nameof(json));
+        }
+
+        var columns = json.SelectToken("$.Workbook.Worksheet.Columns");
+        if (columns is { Type: not JTokenType.Null } && (columns is not JArray columnArray || columnArray.Any(column => column is not JObject)))
+        {
+            throw new ArgumentException("$.Workbook.Worksheet.Columns must be an array of objects.", nameof(json));
+        }
+
+        foreach (var row in rows)
+        {
+            if (row is not JObject jRow)
+            {
+                throw new ArgumentException("Every entry of $.Workbook.Worksheet.SheetData.Rows must be an object.", nameof(json));
+            }
+
+            if (jRow["Cells"] is { Type: not JTokenType.Null } cells && (cells is not JArray cellArray || cellArray.Any(cell => cell is not JObject)))
+            {
+                throw new ArgumentException("The Cells of a row must be an array of objects.", nameof(json));
+            }
+        }
     }
 
     /// <summary>Explicit ids are kept (and must be unique, whole numbers from 1); generated ids skip every explicit one so they never collide (linear: one running counter).</summary>
@@ -242,6 +281,11 @@ public class JsonSpreedSheet
         var names = new string?[jSheets.Count];
         for (var i = 0; i < jSheets.Count; i++)
         {
+            if (jSheets[i]["Name"] is JContainer)
+            {
+                throw new ArgumentException("A sheet name must be text.", "json");
+            }
+
             names[i] = (string?)jSheets[i]["Name"];
             if (names[i] is { } explicitName && !used.Add(ValidateSheetName(explicitName)))
             {
