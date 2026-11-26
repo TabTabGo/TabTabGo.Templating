@@ -2,7 +2,7 @@ name: publish
 
 # The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH (only stable versions are released: the guards refuse any pre-release suffix or build metadata)
 # from a commit on releases/vMAJOR.MINOR.x/vMAJOR.MINOR.PATCH (spec section 8.2, ADR 0001).
-# Stable publishing needs the repository variable STABLE_PUBLISH_MODE=environment (an attestation that the nuget-stable environment has required reviewers) and the secret NUGET_USER.
+# Stable publishing needs the repository variable STABLE_PUBLISH_MODE=environment (an attestation that the nuget-stable environment has required reviewers) and the repository variable NUGET_USER (the nuget.org profile name, not a credential).
 # The publish job checks out nothing: it only downloads the packages the build job produced, re-verifies the set, and pushes them.
 # No workflow_dispatch on purpose. Authentication is nuget.org trusted publishing (OIDC): no long-lived key is stored.
 
@@ -155,11 +155,17 @@ jobs:
             echo "::error::the downloaded packages are not exactly the three expected for $VERSION"; echo "$actual"; exit 1
           fi
 
+      - name: Require the trusted-publishing user
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          [ -n "$NUGET_USER" ] || { echo "::error::repository variable NUGET_USER is not set (nuget.org profile name for trusted publishing)"; exit 1; }
+
       - name: NuGet trusted publishing login (1-hour, single-use API key)
         id: login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
-          user: ${{ secrets.NUGET_USER }}
+          user: ${{ vars.NUGET_USER }}
 
       - name: Push to nuget.org
         env:

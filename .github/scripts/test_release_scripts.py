@@ -488,7 +488,11 @@ class PublishWorkflowShapeTests(unittest.TestCase):
 
     def test_trusted_publishing_not_a_stored_api_key(self):
         self.assertIn("NuGet/login@", self.publish)
-        self.assertIn("user: ${{ secrets.NUGET_USER }}", self.publish)
+        self.assertIn("user: ${{ vars.NUGET_USER }}", self.publish)
+        self.assertNotIn("secrets.NUGET_USER", self.text)  # the profile name is a repository variable, not a credential
+        self.assertIn("NUGET_USER: ${{ vars.NUGET_USER }}", self.publish)
+        self.assertIn('[ -n "$NUGET_USER" ]', self.publish)
+        self.assertLess(self.publish.index("Require the trusted-publishing user"), self.publish.index("NuGet/login@"))
         self.assertIn("steps.login.outputs.NUGET_API_KEY", self.publish)
         self.assertNotIn("secrets.NUGET_API_KEY", self.text)
         self.assertNotIn("secrets.NUGET_KEY", self.text)
