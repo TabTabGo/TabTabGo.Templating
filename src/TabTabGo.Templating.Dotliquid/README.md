@@ -37,8 +37,16 @@ the **thread** unless the template passes a culture argument (bug B-6, fixed on 
 ## Includes and layouts
 
 `{% include 'name' %}` and `{% extends 'layout' %}` read `_name.liquid` from the directory of the template that is being
-rendered. The partial must stay under that directory (name pattern `^[.\/]*[a-zA-Z0-9_\/]+$`). Section 8.0.4 hardens this
-confinement.
+rendered. The partial must stay under that directory: names that are rooted, that climb out of it with `..`, or that come
+from a non-string variable fail with `FileSystemException`. The file system belongs to the render (not to a process-wide
+static), so templates in different folders resolve their own partials when rendered concurrently, and each render starts
+from its own context: values set with `{% assign %}` or `{% capture %}` never carry over to another render of the same
+file. Use one engine instance per thread (or serialise calls): an instance still keeps a hash cache that is not thread-safe
+(bug B-3, fixed on v10).
+
+`RenderString` parses on every call and has no template folder of its own. Includes inside a string template resolve
+against `TemplatingOptions.TemplatesPath` when it is set (confined to that folder, like `Render`); otherwise DotLiquid falls
+back to a file system the host assigned to `Template.FileSystem`, as before 8.0.4.
 
 ## Filters
 
@@ -46,7 +54,7 @@ Filters are called with the C# member name: `{{ value | FormatNumber: 'C' }}`.
 
 | Group | Filters |
 |---|---|
-| Collections | `SelectMany`, `XPathSelectMany`, `RemoveEmpty`, `Union`, `Filter`, `Flatten`, `Distinct`, `OrderBy`, `GroupBy` |
+| Collections | `SelectMany`, `XPathSelectMany`, `RemoveEmpty`, `Union`, `Filter`, `FilterBy`, `FilterByPrefix`, `Flatten`, `Distinct`, `OrderBy`, `GroupBy` |
 | Values and strings | `Contains`, `ToString`, `Select`, `XPathSelect`, `SliceEnd`, `ReverseSlice`, `Strip`, `Lstrip`, `Rstrip`, `GetMatch`, `FullPath`, `AppSetting` |
 | Numbers | `DivideBy`, `Number`, `FormatNumber`, `FormatCurrency`, `FormatCurrencyWithCode`, `MarkNumbers`, `ToWords` |
 | Dates | `ToTimeZone`, `OffsetDate`, `FormatDate`, `ParseDate` |
@@ -69,6 +77,27 @@ Examples (each one is covered by a test in `test/TabTabGo.Templating.DotLiquid.T
 (`it["k"].ToString() = "v"`, `.StartsWith("v")`, `== null`, `!= null`, `.Contains(...) and ...`). Reflection over
 types outside the predefined set is blocked by the library. Do not build expressions from untrusted data.
 
+### `FilterBy` and `FilterByPrefix`
+
+Prefer these to `Filter` when the value comes from data: `{{ items | FilterBy: 'status', 'active' }}` keeps the items whose
+`status` equals `active` (compared as text), `{{ items | FilterByPrefix: 'name', 'Al' }}` keeps those starting with `Al`
+(ordinal). No expression is parsed. `Filter`'s `.StartsWith("x")` is culture-sensitive, so the two differ for characters
+that ICU ignores (for example a soft hyphen).
+
+### `AppSetting`, `GetMatch`, `XPathSelect`
+
+* `{{ 'Brand' | AppSetting }}` returns only keys in `TemplatingOptions.AppSettings`; anything else is an empty string.
+  Host configuration files are never read.
+* `GetMatch` and the JSONPath filters (`JSelectToken*`, regex in `[?(@.n =~ /.../)]`) stop after `TemplatingOptions.RegexTimeout` and
+  degrade per expression: `GetMatch` returns an empty string, the JSONPath filters match nothing.
+* A time-out in DotLiquid's built-in `Replace`/`ReplaceFirst` throws `RegexMatchTimeoutException` out of `Render`/`RenderString` (DotLiquid
+  cannot degrade those per expression, and a failed render must not look like a result). These filters read DotLiquid's process-wide
+  `Template.RegexTimeOut`, which `Initialize()` lowers to the shortest `RegexTimeout` of any engine initialised so far (the strictest engine
+  wins; it is never raised). Engines used only through `RenderString` without `Initialize()` never contribute (bug B-4): call `Initialize()`
+  at start-up. The same static also bounds DotLiquid's template tokenizer, so keep `RegexTimeout` at 50 ms or more.
+* `XPathSelect`/`XPathSelectMany` reject any XML that has a `<!DOCTYPE ...>` (even a plain `<!DOCTYPE html>`, which renders
+  as `Liquid error`) and documents larger than `MaxXmlCharacters`. Strip the DOCTYPE before passing XML to the filter.
+
 ### Custom filters
 
 `engine.RegisterFilter(typeof(MyFilters))` registers a static class of filters. Registration is process-wide: do it
@@ -79,12 +108,10 @@ once at start-up.
 `{% increment name %}` adds 1 to the integer variable `name` in the outermost scope. The variable must already exist
 (a missing variable fails on the v8 line, bug F-12).
 
-## Limits and known issues on the v8 line
+## Known issues on the v8 line
 
-* **Shared parsed templates (fixed in 8.0.4).** `Render(path, ...)` caches the parsed template and renders from that shared
-  instance. A value set with `{% assign %}` can therefore survive into the next render of the same file, and concurrent
-  renders can see each other's assigned values. Until you move to 8.0.4, do not read a variable before assigning it in a
-  template, and do not render one template file from several threads at once.
+**v8 does not confine symbolic links in the include folder: do not use it with a template directory that untrusted parties can write to.** **Known limitation: the template and stylesheet folders must not be writable by untrusted parties.** .NET cannot tell a named pipe or a device file from an empty regular file before opening it (all report `FileAttributes.Normal` and length 0), and a plain open of a named pipe blocks the render thread, so no managed check can refuse one; no native call is made because none is portable to musl, macOS and Windows alike. Someone who can create a pipe in those folders can already replace the templates themselves. Files are read through a byte-counting cap of 16 MB. **The v8 line has no render limits.** There is no iteration cap, no render time-out, no output cap, no nesting cap and no template size cap (`MaxIterations`, `RenderTimeout`, `MaxOutputCharacters`, `MaxNestingDepth` and `MaxTemplateCharacters` exist only on v10 and v11, and are not backported). Do not render templates from untrusted sources with a v8 package: a template can loop, allocate or nest without bound. Use v10 or v11 for that.
 
-The 8.0.4 release addresses the security rows (S-1..S-5, B-1, B-2). The remaining filter and culture fixes ship on v10.
-See the specification in `tabtabgo/docs/templating-modernization/spec.md` section 6.
+Fixed on v10, not on v8: filter, culture and typing bugs F-1..F-17, the per-instance hash cache (B-3: do not share one
+engine instance across threads on v8; create one per render or serialise), and `RenderString` not initialising the engine
+(B-4). The 8.0.4 release closes S-1..S-5, B-1 and B-2 and the shared-template leak. See `tabtabgo/docs/templating-modernization/spec.md` section 6.

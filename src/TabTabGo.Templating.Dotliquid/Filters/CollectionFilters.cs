@@ -21,6 +21,7 @@ namespace TabTabGo.Templating.Liquid.Filters
         private static readonly ParsingConfig DynamicLinqParsingConfig = new ParsingConfig
         {
             AllowEqualsAndToStringMethodsOnObject = true,
+            AllowNewToEvaluateAnyType = false,
         };
 
         public static object SelectMany(IEnumerable array, string property)
@@ -52,11 +53,7 @@ namespace TabTabGo.Templating.Liquid.Filters
                 return xmlInput;
             }
 
-            XPathNavigator nav;
-            XPathDocument docNav;
-            var reader = new StringReader(xmlInput);
-            docNav = new XPathDocument(reader);
-            nav = docNav.CreateNavigator();
+            XPathNavigator nav = SafeXml.Parse(xmlInput).CreateNavigator();
 
             var nodes = nav.Select(xPath);
             var array = new List<object>();
@@ -139,6 +136,33 @@ namespace TabTabGo.Templating.Liquid.Filters
             var filteredArray = array.Cast<Hash>().AsQueryable<Hash>().Where(DynamicLinqParsingConfig, criteria).ToList();
             return filteredArray;
         }
+
+        /// <summary>
+        /// Keeps the items whose <paramref name="key"/> equals <paramref name="value"/> (compared as text). The LINQ-free
+        /// replacement for <c>it["key"].ToString() = "value"</c> that templates should use instead of building expressions from data.
+        /// </summary>
+        public static object FilterBy(IEnumerable array, string key, object value)
+        {
+            if (array == null)
+                return null;
+            var expected = value?.ToString();
+            return array.OfType<Hash>().Where(item => KeyText(item, key) == expected).ToList();
+        }
+
+        /// <summary>
+        /// Keeps the items whose <paramref name="key"/> starts with <paramref name="prefix"/> (ordinal comparison).
+        /// Replacement for <c>it["key"].ToString().StartsWith("prefix")</c>.
+        /// </summary>
+        public static object FilterByPrefix(IEnumerable array, string key, string prefix)
+        {
+            if (array == null)
+                return null;
+            return array.OfType<Hash>()
+                .Where(item => KeyText(item, key) is string text && text.StartsWith(prefix ?? string.Empty, StringComparison.Ordinal))
+                .ToList();
+        }
+
+        private static string KeyText(Hash item, string key) => item.ContainsKey(key) ? item[key]?.ToString() : null;
 
         public static object Flatten(IEnumerable array, string nestedList)
         {

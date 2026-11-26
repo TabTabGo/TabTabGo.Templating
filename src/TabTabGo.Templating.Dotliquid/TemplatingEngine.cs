@@ -1,4 +1,5 @@
-﻿using System.Collections;
+using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -19,12 +20,43 @@ namespace TabTabGo.Templating.Liquid
         private static object _lock = new object();
         private static bool _isIinitialized = false;
         private readonly Dictionary<int, Dictionary<object, object>> _hashCache = new Dictionary<int, Dictionary<object, object>>();
-        private static readonly Dictionary<string, Template> _templateCache = new Dictionary<string, Template>();
+        private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>> _templateCache =
+            new ConcurrentDictionary<(string Path, DateTime LastWriteUtc), Lazy<Template>>();
+        private static long _parseCount;
         public override string EngineName => "Liquid";
+
+        private readonly TemplatingOptions _options;
+
+        /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
+        public TemplatingEngine() : this(new TemplatingOptions())
+        {
+        }
+
+        /// <summary>Creates an engine that applies <paramref name="options"/> to every render.</summary>
+        /// <param name="options">The options (cache switch, allowed settings, regex time-out, XML size cap).</param>
+        public TemplatingEngine(TemplatingOptions options)
+        {
+            _options = TemplatingOptionsValidator.Validate(options, validateRegexTimeout: true);
+        }
+
+        /// <summary>Creates an engine from the options registered in dependency injection.</summary>
+        /// <param name="options">The registered options.</param>
+        public TemplatingEngine(Microsoft.Extensions.Options.IOptions<TemplatingOptions> options)
+            : this((options ?? throw new ArgumentNullException(nameof(options))).Value)
+        {
+        }
         public void Initialize()
         {
             lock (_lock)
             {
+                // DotLiquid's built-in Replace/ReplaceFirst/RemoveFirst... treat their pattern as a regex with a 10 s time-out held in
+                // a process-wide static. Lower it to the shortest RegexTimeout of any engine initialised so far ("the strictest
+                // engine wins"); it is never raised again.
+                if (_options.RegexTimeout != Timeout.InfiniteTimeSpan && _options.RegexTimeout < Template.RegexTimeOut)
+                {
+                    Template.RegexTimeOut = _options.RegexTimeout;
+                }
+
                 if (!_isIinitialized)
                 {
                     Template.NamingConvention = new DotLiquid.NamingConventions.CSharpNamingConvention();
@@ -43,57 +75,126 @@ namespace TabTabGo.Templating.Liquid
             }
         }
 
+        /// <summary>Number of template files parsed since the process started (used by tests to prove single parsing).</summary>
+        internal static long ParseCount => Interlocked.Read(ref _parseCount);
+
         public override bool IsCached(string templatePath)
         {
-            return _templateCache.ContainsKey(templatePath);
+            if (!_options.CacheTemplates || string.IsNullOrEmpty(templatePath))
+            {
+                return false;
+            }
+
+            var fullPath = Path.GetFullPath(templatePath);
+            return File.Exists(fullPath)
+                && _templateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath)), out var cached)
+                && cached.IsValueCreated;
         }
 
         public override void ParseTemplate(string templatePath)
         {
-            if (!_templateCache.ContainsKey(templatePath))
-            {
-                if (!File.Exists(templatePath))
-                {
-                    throw new Exception($"File {templatePath} doesn't exist!");
-                }
-
-                lock (_lock)
-                {
-                    var template = Template.Parse(File.ReadAllText(templatePath));
-                    _templateCache[templatePath] = template;
-                }
-            }
+            GetTemplate(templatePath);
         }
 
         public override object Render(string templatePath, object sourceData, string culture ="en-Us")
         {
             Initialize();
 
-            ParseTemplate(templatePath);
+            var (template, fullPath) = GetTemplate(templatePath);
 
             var hash = HashIt(sourceData);
 
-            
-            var parameters = new RenderParameters(new CultureInfo(culture))
+            // The file system is resolved from the full path (a bare "main.liquid" has an empty directory name) and
+            // travels with the render: DotLiquid reads Registers["file_system"] before the process-wide static (B-1).
+            var fileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(fullPath));
+            var cultureInfo = new CultureInfo(culture);
+
+            // The parsed template is cached and shared by every render, so each render gets its own Context. Rendering
+            // through the template's own Registers/InstanceAssigns would let {% assign %} values and registers of one
+            // render appear in the next one (or in a parallel one).
+            var context = new Context(
+                new List<Hash> { Hash.FromDictionary(hash) },
+                new Hash(),
+                Hash.FromDictionary(new Dictionary<string, object> { ["file_system"] = fileSystem }),
+                ErrorsOutputMode.Display,
+                0,
+                0,
+                cultureInfo);
+
+            using (RenderScope.Begin(_options, fileSystem))
             {
-                LocalVariables = Hash.FromDictionary(hash)
-            };
-
-            Template.FileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
-            var result = _templateCache[templatePath].Render(parameters);
-
-            return result;
+                // A regex time-out in DotLiquid's built-in Replace/ReplaceFirst propagates as RegexMatchTimeoutException: the
+                // render failed, and a failure must not look like a successful (e-mail body, report) result.
+                return template.Render(RenderParameters.FromContext(context, cultureInfo));
+            }
         }
 
         public override string RenderString(string templateString, object sourceData, string culture ="en-Us")
         {
+            // Parsed per call, so nothing is shared between renders.
             var template = Template.Parse(templateString);
             var hash = HashIt(sourceData);
             var parameters = new RenderParameters(new CultureInfo(culture))
             {
                 LocalVariables = Hash.FromDictionary(hash)
             };
-            return template.Render(parameters);
+
+            // With TemplatesPath set, includes resolve (confined) against it. Without it DotLiquid falls back to a file
+            // system the host assigned to Template.FileSystem, as before 8.0.4.
+            EnhancedLocalFileSystem fileSystem = null;
+            if (!string.IsNullOrEmpty(_options.TemplatesPath))
+            {
+                fileSystem = new EnhancedLocalFileSystem(Path.GetFullPath(_options.TemplatesPath));
+                parameters.Registers = Hash.FromDictionary(new Dictionary<string, object> { ["file_system"] = fileSystem });
+            }
+
+            using (RenderScope.Begin(_options, fileSystem))
+            {
+                return template.Render(parameters);
+            }
+        }
+
+        private (Template Template, string FullPath) GetTemplate(string templatePath)
+        {
+            var fullPath = string.IsNullOrEmpty(templatePath) ? templatePath : Path.GetFullPath(templatePath);
+            if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
+            {
+                throw new Exception($"File {templatePath} doesn't exist!");
+            }
+
+            if (!_options.CacheTemplates)
+            {
+                return (ParseFile(fullPath), fullPath);
+            }
+
+            // Keyed by full path and last write time: an edited file is parsed again, and relative and absolute spellings
+            // of one path share an entry (B-2).
+            var lastWrite = File.GetLastWriteTimeUtc(fullPath);
+            var key = (fullPath, lastWrite);
+            var entry = _templateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path), LazyThreadSafetyMode.ExecutionAndPublication));
+
+            foreach (var stale in _templateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
+            {
+                _templateCache.TryRemove(stale, out _);
+            }
+
+            try
+            {
+                return (entry.Value, fullPath);
+            }
+            catch
+            {
+                _templateCache.TryRemove(key, out _); // do not cache a failed parse
+                throw;
+            }
+        }
+
+        private static Template ParseFile(string fullPath)
+        {
+            Interlocked.Increment(ref _parseCount);
+            var template = Template.Parse(File.ReadAllText(fullPath));
+            template.MakeThreadSafe(); // the instance is shared; renders use their own Context (see Render)
+            return template;
         }
 
         public override void RegisterFilter(Type type)

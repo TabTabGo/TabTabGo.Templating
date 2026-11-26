@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -22,6 +22,27 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
 
         private WorkbookPart CurrentWorkbookPart { get; set; }
         public override string EngineName => "OpenXml";
+
+        private readonly TemplatingOptions _options;
+
+        /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
+        public TemplatingEngine() : this(new TemplatingOptions())
+        {
+        }
+
+        /// <summary>Creates an engine with the given options.</summary>
+        /// <param name="options">The options.</param>
+        public TemplatingEngine(TemplatingOptions options)
+        {
+            _options = TemplatingOptionsValidator.Validate(options, validateRegexTimeout: false);
+        }
+
+        /// <summary>Creates an engine from the options registered in dependency injection.</summary>
+        /// <param name="options">The registered options.</param>
+        public TemplatingEngine(Microsoft.Extensions.Options.IOptions<TemplatingOptions> options)
+            : this((options ?? throw new ArgumentNullException(nameof(options))).Value)
+        {
+        }
 
         //ToDo: add implementation with cache capabilities
         public override bool IsCached(string templatePath)
@@ -75,22 +96,22 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 );
             }
 
-            string outputFilePath = Path.GetTempFileName() + Path.GetExtension(templatePath);
+            // Everything is rendered in memory: no temp file is created, so nothing can leak when a render throws (X-3).
+            var output = new MemoryStream();
             if (string.IsNullOrEmpty(templatePath) && jObject.SelectToken("$.Workbook") != null)
             {
                 // Generate standard SpreadSheet
-                var jSpressdSheet = new JsonSpreedSheet();
-                jSpressdSheet.CreateExcelDoc(outputFilePath, jObject);
+                var jSpressdSheet = new JsonSpreedSheet(_options);
+                jSpressdSheet.CreateExcelDoc(output, jObject);
             }
             else if (!string.IsNullOrEmpty(templatePath))
             {
                 Dictionary<int, string> macroList = null;
-                //prepare excel file
-                string sourceFilePath = templatePath;
+                var template = File.ReadAllBytes(templatePath);
+                output.Write(template, 0, template.Length);
+                output.Position = 0;
 
-                File.Copy(sourceFilePath, outputFilePath, true);
-
-                using (var excel = SpreadsheetDocument.Open(outputFilePath, true))
+                using (var excel = SpreadsheetDocument.Open(output, true))
                 {
                     this.CurrentWorkbookPart = excel.WorkbookPart;
                     macroList = GetListOfMacroToReplace(CurrentWorkbookPart);
@@ -102,20 +123,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                 throw new NotSupportedException("Generate SpreadSheet can't be render.");
             }
 
-            var mStream = new MemoryStream(FileUtility.GetFileContent(outputFilePath));
-
-            try
-            {
-                File.Delete(outputFilePath);
-            }
-            catch (UnauthorizedAccessException unauthorized)
-            {
-                // ignored
-            }
-            catch (NotSupportedException nexException) { }
-            catch (Exception exception) { }
-
-            return mStream;
+            output.Position = 0;
+            return output;
         }
 
         #region Helper function
@@ -534,9 +543,8 @@ namespace TabTabGo.Templating.OpenXml.SpreadSheet
                     else if (bool.TryParse(valueString, out blValue))
                     {
                         nCell.DataType = new EnumValue<CellValues>(CellValues.Boolean);
-                        nCell.CellValue = new CellValue(
-                            dblValue.ToString(CultureInfo.InvariantCulture)
-                        );
+                        // a boolean cell holds 1 or 0; the old code wrote the unrelated double (always 0), so true became FALSE (X-2)
+                        nCell.CellValue = new CellValue(blValue ? "1" : "0");
                     }
                     else if (DateTime.TryParse(valueString, out dtValue))
                     {

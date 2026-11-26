@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -64,9 +64,17 @@ namespace TabTabGo.Templating.Liquid.Filters
 
             RegexOptions options = RegexOptions.Multiline;
 
-            Match m = Regex.Match(input, pattern, options);
+            try
+            {
+                // Template-supplied patterns run with a time-out so catastrophic backtracking cannot stall a render (S-4).
+                Match m = Regex.Match(input, pattern, options, RenderScope.CurrentOptions.RegexTimeout);
 
-            return m == null ? string.Empty : m.Value;
+                return m == null ? string.Empty : m.Value;
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return string.Empty;
+            }
         }
     }
 }

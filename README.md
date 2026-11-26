@@ -15,7 +15,7 @@ and can be referenced together.
 
 | Line | Branch | Target | Status |
 |---|---|---|---|
-| v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport). .NET 8 support ends 2026-11-10 |
+| v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport: AppSetting opt-in, confined includes, regex time-out, DTD-free XML, per-render file system, safe template cache, OpenXml fixes). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.0` | net10.0 | planned LTS line |
 | v11 | `releases/v11.0.x/v11.0.0` | net11.0 | planned, pre-release until .NET 11 GA |
 
@@ -47,11 +47,25 @@ Packages are published **only from tags**. There is no publish from `master` or 
    branch, version equals the tag, version not yet on nuget.org), builds, tests, scans, packs, and publishes through
    nuget.org trusted publishing. Stable tags wait for approval of the `nuget-stable` environment.
 
+If a publish run fails part-way (some packages pushed, others not), do not re-run it: re-runs are refused and `dotnet nuget
+push` is run without `--skip-duplicate`. Fix the cause, bump the patch version in `Directory.Build.props` on the release
+branch and tag the new version.
+
 Pack locally without publishing:
 
 ```bash
 dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.3 -o out
 ```
+
+## Release notes 8.0.4
+
+**On v8, Date cells in JSON workbooks are written as culture-formatted text in a numeric cell, and the date value is LOST or WRONG when the workbook is opened in a spreadsheet (a tested example: LibreOffice reads 2024-05-06 as 5 and 2000-01-02 as 1). Do not use Date cells in JSON workbooks on v8; use v10 or v11.** **v8 does not confine symbolic links in the include folder: do not use it with a template directory that untrusted parties can write to.** **Known limitation: the template and stylesheet folders must not be writable by untrusted parties.** .NET cannot tell a named pipe or a device file from an empty regular file before opening it (all report `FileAttributes.Normal` and length 0), and a plain open of a named pipe blocks the render thread, so no managed check can refuse one; no native call is made because none is portable to musl, macOS and Windows alike. Someone who can create a pipe in those folders can already replace the templates themselves. Files are read through a byte-counting cap of 16 MB.
+
+**The v8 line has no render limits.** There is no iteration cap, no render time-out, no output cap, no nesting cap and no template size cap (`MaxIterations`, `RenderTimeout`, `MaxOutputCharacters`, `MaxNestingDepth` and `MaxTemplateCharacters` exist only on v10 and v11, and are not backported). Do not render templates from untrusted sources with a v8 package: a template can loop, allocate or nest without bound. Use v10 or v11 for that.
+
+Callers (e-mail and report services) must now catch `RegexMatchTimeoutException` from `Render`/`RenderString`: a catastrophic regex in
+DotLiquid's built-in `Replace`/`ReplaceFirst` stops at `TemplatingOptions.RegexTimeout` (200 ms by default; 6.0.5 and 8.0.3 stopped after 10 s)
+and the exception propagates instead of producing output.
 
 ## Upgrading from 6.0.5
 
