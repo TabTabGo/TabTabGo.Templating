@@ -161,15 +161,59 @@ public sealed class JsonSpreedSheetCellTests
     }
 
     [Fact]
-    public void WorkbookWithoutColumnsOrRows_IsStillWritten_ButNeedsASheet()
+    public void WorkbookWithoutColumns_IsStillWritten_ButNeedsASheetAndARowsArray()
     {
         using var stream = new MemoryStream();
-        new JsonSpreedSheet().CreateExcelDoc(stream, JObject.Parse("""{ "Workbook": { "Sheets": [ { "Name": "S" } ] } }"""));
+        new JsonSpreedSheet().CreateExcelDoc(stream, JObject.Parse("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": [] } } } }"""));
         stream.Position = 0;
         using var document = SpreadsheetDocument.Open(stream, false);
 
         Assert.Single(document.WorkbookPart!.Workbook!.Descendants<Sheet>());
         Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(new MemoryStream(), JObject.Parse("""{ "Workbook": { } }""")));
+    }
+
+    [Theory]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ] } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": null } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": { "a": 1 } } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": "SECRET-ROWS" } } } }""")]
+    public void MissingOrNonArrayRowsOrSheetData_IsAnArgumentException_NotAnEmptyWorkbook(string json)
+    {
+        var stream = new MemoryStream();
+
+        var error = Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(stream, JObject.Parse(json)));
+
+        Assert.DoesNotContain("SECRET", error.Message);
+        Assert.Equal(0, stream.Length); // refused before the package is created
+    }
+
+    [Theory]
+    [InlineData("""{ "Workbook": { "Sheets": { "SECRET": 1 }, "Worksheet": { "SheetData": { "Rows": [] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": "SECRET", "Worksheet": { "SheetData": { "Rows": [] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ "SECRET" ], "Worksheet": { "SheetData": { "Rows": [] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": { "SECRET": 1 } } ], "Worksheet": { "SheetData": { "Rows": [] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "Columns": { "SECRET": 1 }, "SheetData": { "Rows": [] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "Columns": [ "SECRET" ], "SheetData": { "Rows": [] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": [ "SECRET" ] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": [ { "Cells": { "SECRET": 1 } } ] } } } }""")]
+    [InlineData("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "SheetData": { "Rows": [ { "Cells": [ "SECRET" ] } ] } } } }""")]
+    public void WrongJsonShape_IsAnArgumentException_WithoutTheValue(string json)
+    {
+        var error = Assert.Throws<ArgumentException>(() => new JsonSpreedSheet().CreateExcelDoc(new MemoryStream(), JObject.Parse(json)));
+
+        Assert.DoesNotContain("SECRET", error.Message);
+    }
+
+    [Fact]
+    public void NullColumnsAndNullCells_AreNotGiven()
+    {
+        using var stream = new MemoryStream();
+
+        new JsonSpreedSheet().CreateExcelDoc(stream, JObject.Parse("""{ "Workbook": { "Sheets": [ { "Name": "S" } ], "Worksheet": { "Columns": null, "SheetData": { "Rows": [ { "Cells": null } ] } } } }"""));
+
+        Assert.True(stream.Length > 0);
     }
 
     [Fact]

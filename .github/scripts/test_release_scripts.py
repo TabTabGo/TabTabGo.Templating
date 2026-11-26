@@ -1,5 +1,6 @@
 """Self tests for the release scripts. Run: python3 -m unittest discover .github/scripts"""
 import contextlib
+import http.client
 import io
 import json
 import re
@@ -267,6 +268,47 @@ class ApiCompatTests(unittest.TestCase):
         self.assertEqual([1, 2], sleeps)
         self.assertIn("not a missing baseline", str(raised.exception))
 
+    def test_fetch_retries_a_connection_cut_mid_body_and_other_non_oserror_failures(self):
+        for failure in (http.client.IncompleteRead(b"ab", 10), http.client.RemoteDisconnected("closed"), EOFError("short")):
+            with self.subTest(failure=type(failure).__name__):
+                results = [failure, failure, None]
+                sleeps = []
+
+                def flaky(url, destination):
+                    outcome = results.pop(0)
+                    if outcome is not None:
+                        raise outcome
+                    Path(destination).write_bytes(b"ok")
+
+                with unittest.mock.patch("urllib.request.urlretrieve", flaky), contextlib.redirect_stdout(io.StringIO()):
+                    package = apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=sleeps.append)
+                self.assertIsNotNone(package)
+                self.assertEqual([1, 2], sleeps)
+
+    def test_fetch_gives_up_after_three_cut_connections_with_a_plain_message(self):
+        def cut(url, destination):
+            raise http.client.IncompleteRead(b"", 5)
+
+        with unittest.mock.patch("urllib.request.urlretrieve", cut), contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=lambda s: None)
+        self.assertIn("could not download", str(raised.exception))
+
+    def test_unpack_skips_entries_with_dot_dot_segments(self):
+        work = Path(tempfile.mkdtemp())
+        package = work / "p.nupkg"
+        with zipfile.ZipFile(package, "w") as archive:
+            archive.writestr("lib/net10.0/A.dll", "good")
+            archive.writestr("lib/net10.0/../../../escape.dll", "bad")
+            archive.writestr("lib/net10.0/..\\..\\escape2.dll", "bad")
+            archive.writestr("lib/net10.0/sub/../B.dll", "bad")
+        target = work / "out"
+
+        folder = apicompat.unpack(package, "net10.0", target)
+
+        self.assertEqual(["A.dll"], sorted(p.name for p in folder.rglob("*.dll")))
+        self.assertFalse(list(work.rglob("escape*.dll")))
+
     def test_fetch_treats_404_as_missing_without_retrying(self):
         calls = []
 
@@ -277,6 +319,59 @@ class ApiCompatTests(unittest.TestCase):
         with unittest.mock.patch("urllib.request.urlretrieve", not_found):
             self.assertIsNone(apicompat.fetch_baseline("TabTabGo.Templating", "10.0.0", Path(tempfile.mkdtemp()), sleep=lambda s: None))
         self.assertEqual(1, len(calls))
+
+
+class PinFormTests(unittest.TestCase):
+    """Round 4: single-quoted attributes, the element form, comments and a version hidden behind a property."""
+
+    def _repo(self, packages="", properties="", build_props=""):
+        root = Path(tempfile.mkdtemp())
+        (root / "src").mkdir()
+        (root / "Directory.Packages.props").write_text(f"<Project><PropertyGroup>{properties}</PropertyGroup><ItemGroup>{packages}</ItemGroup></Project>")
+        (root / "Directory.Build.props").write_text(f"<Project>{build_props}</Project>")
+        (root / "global.json").write_text("{}")
+        return root
+
+    def test_single_quoted_prerelease_pin_blocks_a_stable_tag(self):
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo("<PackageVersion Include='A' Version='11.0.0-rc.3' />"), False)
+
+    def test_element_form_prerelease_pin_blocks_a_stable_tag(self):
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo("<PackageReference Include='A'><Version>11.0.0-preview.1</Version></PackageReference>"), False)
+
+    def test_element_form_stable_pin_passes(self):
+        release_guards.check_pins_match_release_kind(self._repo("<PackageReference Include='A'><Version>11.0.0</Version></PackageReference>"), False)
+
+    def test_commented_out_prerelease_pin_is_ignored(self):
+        release_guards.check_pins_match_release_kind(self._repo("<!-- <PackageVersion Include='A' Version='11.0.0-rc.3' /> --><PackageVersion Include='A' Version='10.0.1' />"), False)
+
+    def test_prerelease_pin_behind_a_property_blocks_a_stable_tag(self):
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" />', "<CoreVersion>11.0.0-rc.3</CoreVersion>"), False)
+
+    def test_local_pin_behind_a_property_blocks_every_tag(self):
+        for prerelease in (False, True):
+            with self.subTest(prerelease=prerelease):
+                with self.assertRaises(release_guards.GuardError):
+                    release_guards.check_pins_match_release_kind(
+                        self._repo('<PackageVersion Include="TabTabGo.Core" Version="$(CoreVersion)" />', "<CoreVersion>[$(Base)-local.abc1234, 11.0.0)</CoreVersion><Base>10.0.0</Base>"),
+                        prerelease,
+                    )
+
+    def test_property_declared_in_the_build_props_is_resolved(self):
+        repo = self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" />', build_props="<PropertyGroup><CoreVersion>10.0.0-local.1</CoreVersion></PropertyGroup>")
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(repo, True)
+
+    def test_stable_property_pin_and_unknown_property_pass(self):
+        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" /><PackageVersion Include="B" Version="$(Unknown)" />', "<CoreVersion>10.0.1</CoreVersion>"), False)
+
+    def test_prerelease_tag_accepts_prerelease_pins_in_every_form(self):
+        release_guards.check_pins_match_release_kind(self._repo("<PackageVersion Include='A' Version='11.0.0-rc.3' />"), True)
+
+    def test_resolve_properties_stops_on_a_cycle(self):
+        self.assertEqual(release_guards.resolve_properties("$(A)", {"A": "$(B)", "B": "$(A)"}), "$(A)")
 
 
 class AssertPackagesTests(unittest.TestCase):

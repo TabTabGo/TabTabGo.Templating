@@ -48,7 +48,9 @@ public class EnhancedLocalFileSystem : IFileSystem
                 throw new FileSystemException("Illegal template path", templatePath);
             }
 
-            return Internal.GuardedRead.ReadText(realPath);
+            var text = Internal.GuardedRead.ReadText(realPath);
+            Internal.TemplateNesting.Check(text, RenderScope.CurrentOptions.MaxNestingDepth); // a partial is parsed by DotLiquid on the caller's stack: refuse it before that when it nests too deeply (S-13)
+            return text;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {

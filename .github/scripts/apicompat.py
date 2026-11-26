@@ -19,6 +19,7 @@ be released before that version is on nuget.org: the fetch fails with a clear me
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -53,13 +54,15 @@ def semver_key(version: str) -> tuple:
 def unpack(package: Path, tfm: str, target: Path) -> Path:
     with zipfile.ZipFile(package) as archive:
         for name in archive.namelist():
+            if ".." in re.split(r"[/\\]", name):
+                continue  # a package entry that climbs out of the target is never extracted (a published package is trusted, a damaged or planted one is not)
             if name.startswith(f"lib/{tfm}/") and name.endswith(".dll"):
                 archive.extract(name, target)
     return target / "lib" / tfm
 
 
 def fetch_baseline(package_id: str, version: str, target: Path, sleep: Callable[[float], None] = time.sleep) -> Path | None:
-    """Downloads a published package; None when it is not on nuget.org (404). Other errors are retried (3 tries, 1 s then 2 s apart) and then reported plainly."""
+    """Downloads a published package; None when it is not on nuget.org (404). Other errors are retried (3 tries, 1 s then 2 s apart; a cut connection (IncompleteRead) counts) and then reported plainly."""
     url = f"https://api.nuget.org/v3-flatcontainer/{package_id.lower()}/{version}/{package_id.lower()}.{version}.nupkg"
     destination = target / f"{package_id}.{version}.nupkg"
     last: Exception | None = None
@@ -71,7 +74,8 @@ def fetch_baseline(package_id: str, version: str, target: Path, sleep: Callable[
             if error.code == 404:
                 return None
             last = error
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, EOFError) as error:
+            # http.client.IncompleteRead (a connection cut mid-body) is an HTTPException, not an OSError; retried like any other transient download failure
             last = error
         if attempt < FETCH_ATTEMPTS:
             print(f"::warning::nuget.org answered {last} for {package_id} {version}; retrying ({attempt}/{FETCH_ATTEMPTS - 1})")

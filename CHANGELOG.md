@@ -62,6 +62,12 @@ mode, no temp files). No public API of 8.0.4 was removed or changed.
 - The template cache is keyed by `MaxNestingDepth` as well and sweeps stale entries only when a new entry is added; partial names no longer accept a trailing newline.
 - CI: the vulnerability gate fails closed (any `problems`, no projects, no sources, an empty `frameworks`); `NU1900` is an error; release tags accept ASCII digits without leading zeros only; `Version` and `TargetFramework` are read as XML.
 
+### Fixed (fix round 4)
+- JSON workbook (`JsonSpreedSheet`): a missing or non-array `$.Workbook.Worksheet.SheetData.Rows`, or a missing `SheetData`, is an `ArgumentException` (it silently produced an empty workbook, as v8 already refused it). A workbook of the wrong JSON shape (`Workbook.Sheets`, `Columns`, `Rows` or `Cells` not an array, an entry that is not an object, a non-text sheet `Name`) is an `ArgumentException` instead of Json.NET's `InvalidOperationException`/`InvalidCastException`; messages name the path, never a value; nothing is written. A JSON `null` `Columns` or `Cells` is "not given".
+- Partials read by `include`/`extends` through the render's file system are scanned against `MaxNestingDepth` before DotLiquid parses them (a deeply nested partial bypassed the S-13 guard).
+- Tests that returned silently as root or on Windows now skip visibly (`Assert.Skip`).
+- Release guard: the stable-tag pin check reads single-quoted attributes and the `<Version>` element form, ignores comments, and resolves `$(Property)` references before looking for pre-release and `-local` versions.
+
 ### Removed
 - Dependencies on `TabTabGo.IO.Utilities` and `Common.Logging.Core`; `Newtonsoft.Json` from the base package.
 
