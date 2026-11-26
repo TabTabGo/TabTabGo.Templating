@@ -1,0 +1,143 @@
+name: publish
+
+# The only way a package reaches nuget.org: push a tag vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|ci|alpha|beta).N
+# from a commit on releases/vMAJOR.MINOR.x/vMAJOR.MINOR.PATCH (spec section 8.2, ADR 0001).
+# No workflow_dispatch on purpose. Authentication is nuget.org trusted publishing (OIDC): no long-lived key is stored.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.guards.outputs.version }}
+      prerelease: ${{ steps.guards.outputs.prerelease }}
+    steps:
+      - name: Refuse re-runs and actor mismatches (a re-run keeps the original actor; tag again instead)
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs of a publish run are not allowed; push a new tag"; exit 1; fi
+          if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor"; exit 1; fi
+
+      - name: Checkout the tag explicitly (full history so release branches and tags are available)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Release guards (tag format, tag major == TFM major, tag on its release branch, version == tag, not published)
+        id: guards
+        run: |
+          python3 .github/scripts/release_guards.py "$GITHUB_REF_NAME" "$GITHUB_SHA" > guards.out
+          cat guards.out >> "$GITHUB_OUTPUT"
+          rm guards.out
+
+      - name: Setup .NET (version from global.json)
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore TabTabGo.Templating.sln
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.guards.outputs.version }}
+        run: |
+          extra=""
+          if grep -q '<TtgWarnAsError>true</TtgWarnAsError>' Directory.Build.props; then extra="-warnaserror"; fi
+          dotnet build TabTabGo.Templating.sln -c Release --no-restore -p:Version="$VERSION" $extra
+
+      - name: Test (gating)
+        run: dotnet test TabTabGo.Templating.sln -c Release --no-build --logger "console;verbosity=normal"
+
+      - name: Vulnerability gate
+        shell: bash # explicit shell enables pipefail
+        run: |
+          dotnet list TabTabGo.Templating.sln package --vulnerable --include-transitive --format json \
+            | python3 .github/scripts/vuln_gate.py
+
+      - name: Pack
+        env:
+          VERSION: ${{ steps.guards.outputs.version }}
+        run: dotnet pack TabTabGo.Templating.sln -c Release --no-build -p:Version="$VERSION" -p:ContinuousIntegrationBuild=true -o out
+
+      - name: Assert the package set (names, version, dependencies, target framework)
+        env:
+          VERSION: ${{ steps.guards.outputs.version }}
+        run: |
+          tfm=$(grep -ho '<TargetFramework>[^<]*' Directory.Build.props src/*/*.csproj | head -1 | sed 's/<TargetFramework>//')
+          python3 .github/scripts/assert_packages.py out "$VERSION" --tfm "$tfm"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: packages
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Stable tags wait for the required reviewers of the nuget-stable environment.
+    environment: ${{ needs.build.outputs.prerelease == 'true' && 'nuget-prerelease' || 'nuget-stable' }}
+    permissions:
+      id-token: write # the only job allowed to request an OIDC token
+      contents: read
+    steps:
+      - name: Refuse re-runs and actor mismatches
+        env:
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [ "$RUN_ATTEMPT" != "1" ]; then echo "::error::re-runs of a publish run are not allowed; push a new tag"; exit 1; fi
+          if [ "$ACTOR" != "$TRIGGERING_ACTOR" ]; then echo "::error::triggering actor differs from actor"; exit 1; fi
+
+      - name: Download packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: packages
+          path: out
+
+      - name: NuGet trusted publishing login (1-hour, single-use API key)
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "out/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          {
+            echo "### Published $VERSION"
+            echo ""
+            echo "- [TabTabGo.Templating](https://www.nuget.org/packages/TabTabGo.Templating/$VERSION)"
+            echo "- [TabTabGo.Templating.Dotliquid](https://www.nuget.org/packages/TabTabGo.Templating.Dotliquid/$VERSION)"
+            echo "- [TabTabGo.Templating.OpenXml](https://www.nuget.org/packages/TabTabGo.Templating.OpenXml/$VERSION)"
+            echo ""
+            echo "Commit: \`$GITHUB_SHA\` - approver/actor: \`${{ github.triggering_actor }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

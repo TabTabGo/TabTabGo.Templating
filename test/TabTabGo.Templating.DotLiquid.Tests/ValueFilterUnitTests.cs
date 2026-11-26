@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -11,6 +11,7 @@ using Xunit;
 namespace TabTabGo.Templating.DotLiquid.Tests
 {
     
+    [Collection("liquid-static")]
     public class ValueFilterUnitTests
     {
         [Fact]
@@ -80,8 +81,9 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
-            var fullPath = Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/someFile.png") 
-                + "," + Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/content/someFile.png");
+            // the template prepends "content" to the file name with no separator (Prepend semantics), see spec 11.4
+            var fullPath = Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/someFile.png")
+                + "," + Path.GetFullPath(AppContext.BaseDirectory + "/../../../liquids/") + "contentsomeFile.png";
             Assert.Equal(fullPath, renderedData);
         }
 
@@ -145,9 +147,19 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var templatePath = "./liquids/number.liquid";
             dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
 
-            var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
-            var expectedResult = "number:$12,345.00";
-            Assert.Equal(expectedResult, renderedData);
+            // The engine formats with the thread culture today (bug B-6, fixed on v10), so pin it for the test.
+            var previous = CultureInfo.CurrentCulture;
+            CultureInfo.CurrentCulture = new CultureInfo("en-US");
+            try
+            {
+                var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
+                var expectedResult = "number:$12,345.00";
+                Assert.Equal(expectedResult, renderedData);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = previous;
+            }
         }
 
         [Fact]

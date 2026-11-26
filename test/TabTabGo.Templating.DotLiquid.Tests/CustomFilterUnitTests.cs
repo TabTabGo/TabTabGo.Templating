@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -11,6 +11,7 @@ using Xunit;
 namespace TabTabGo.Templating.DotLiquid.Tests
 {
     
+    [Collection("liquid-static")]
     public class CustomFilterUnitTests
     {
         [Fact]
