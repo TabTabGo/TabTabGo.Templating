@@ -33,7 +33,9 @@ namespace TabTabGo.Templating.Liquid
 
             try
             {
-                return GuardedRead.ReadText(fullPath);
+                var text = GuardedRead.ReadText(fullPath);
+                Internal.TemplateNesting.Check(text, RenderScope.CurrentOptions.MaxNestingDepth); // a partial is parsed by DotLiquid on the caller's stack: refuse it before that when it nests too deeply (S-13)
+                return text;
             }
             catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException || ex is System.Security.SecurityException)
             {
