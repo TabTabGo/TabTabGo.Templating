@@ -88,6 +88,7 @@ public sealed class PathDisclosureTests : IDisposable
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return; // symlinks are not available (Windows without developer mode): nothing to check here
         }
 
@@ -112,6 +113,7 @@ public sealed class PathDisclosureTests : IDisposable
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 

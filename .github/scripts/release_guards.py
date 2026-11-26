@@ -138,16 +138,22 @@ def check_declared_version(root: Path, core: str) -> None:
 
 
 _PROPERTY_REFERENCE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_.\-]*)\)")
-_PRERELEASE = re.compile(r"-(rc|preview|alpha|beta)", re.ASCII)
+_SEMVER_LABEL = re.compile(r"[0-9]-[0-9A-Za-z]")  # any SemVer pre-release label (-rc, -preview, -local, -anything), whatever its case
+MAX_RESOLVED_LENGTH = 4096
+MAX_CANDIDATES = 256
+PropertyValues = dict[str, list[str]]
 
 
 def _local_name(element: ET.Element) -> str:
     return element.tag.rpartition("}")[2]
 
 
-def collect_properties(paths: list[Path]) -> dict[str, str]:
-    """Every MSBuild property declared in a PropertyGroup of the given files (first declaration wins; unreadable files are skipped here and reported by the caller)."""
-    properties: dict[str, str] = {}
+def collect_properties(paths: list[Path]) -> PropertyValues:
+    """Every value any PropertyGroup of the given files declares for each property, in order.
+
+    MSBuild keeps the last declaration that applies and a Condition decides what applies, which a text check cannot know; so every declared value counts
+    (a later or conditional -rc or -local value must not slip through). Unreadable files are skipped here and reported by the caller."""
+    properties: PropertyValues = {}
     for path in paths:
         try:
             root = ET.parse(path).getroot()
@@ -157,44 +163,56 @@ def collect_properties(paths: list[Path]) -> dict[str, str]:
             if _local_name(group) != "PropertyGroup":
                 continue
             for element in group:
-                name = _local_name(element)
-                if element.text and element.text.strip() and name not in properties:
-                    properties[name] = element.text.strip()
+                if element.text and element.text.strip():
+                    properties.setdefault(_local_name(element), []).append(element.text.strip())
     return properties
 
 
-def resolve_properties(value: str, properties: dict[str, str], depth: int = 8) -> str:
-    """Replaces $(Name) with the declared property value (repeatedly, so a property may name another); an undeclared name stays as written."""
+def expand_properties(value: str, properties: PropertyValues, depth: int = 8) -> list[str]:
+    """Every string `value` can resolve to when each $(Name) takes each of its declared values (repeatedly, so a property may name another).
+
+    An undeclared name, a cycle, or a result past MAX_RESOLVED_LENGTH / MAX_CANDIDATES leaves a $( in the string, which a stable tag treats as a problem."""
+    results = [value]
     for _ in range(depth):
-        resolved = _PROPERTY_REFERENCE.sub(lambda m: properties.get(m.group(1), m.group(0)), value)
-        if resolved == value:
+        following: list[str] = []
+        changed = False
+        for candidate in results:
+            reference = next((m for m in _PROPERTY_REFERENCE.finditer(candidate) if m.group(1) in properties), None)
+            if reference is None:
+                following.append(candidate)
+                continue
+            changed = True
+            for declared in properties[reference.group(1)]:
+                expanded = candidate[: reference.start()] + declared + candidate[reference.end():]
+                following.append(expanded if len(expanded) <= MAX_RESOLVED_LENGTH else candidate)
+        results = list(dict.fromkeys(following))[:MAX_CANDIDATES]
+        if not changed:
             break
-        value = resolved
-    return value
+    return results
 
 
-def resolved_versions(path: Path, properties: dict[str, str] | None = None) -> list[str]:
-    """The versions a build resolves from `path`: Version and VersionOverride attributes (either quote style) and Version, VersionOverride and PackageVersion elements, with
-    $(Property) references resolved. Comments, descriptions and other text are not versions and are never read (the file is parsed as XML)."""
+def resolved_versions(path: Path, properties: PropertyValues | None = None) -> list[str]:
+    """The versions a build can resolve from `path`: Version and VersionOverride attributes (either quote style) and Version, VersionOverride and PackageVersion elements, with
+    $(Property) references expanded over every declared value. Comments, descriptions and other text are not versions and are never read (the file is parsed as XML)."""
     properties = properties or {}
     versions: list[str] = []
     for element in ET.parse(path).getroot().iter():
         for name in ("Version", "VersionOverride"):
             if name in element.attrib:
-                versions.append(resolve_properties(element.attrib[name], properties))
+                versions.extend(expand_properties(element.attrib[name], properties))
         if _local_name(element) in ("Version", "VersionOverride", "PackageVersion") and element.text and element.text.strip():
-            versions.append(resolve_properties(element.text.strip(), properties))
+            versions.extend(expand_properties(element.text.strip(), properties))
     return versions
 
 
-def references_local_build(path: Path, properties: dict[str, str] | None = None) -> bool:
-    """True when a version a build resolves (a Version, VersionOverride or Include attribute, or a Version element, after property resolution) names a -local build; descriptions and comments do not count."""
+def references_local_build(path: Path, properties: PropertyValues | None = None) -> bool:
+    """True when a version a build can resolve (a Version, VersionOverride or Include attribute, or a Version element, after property expansion) names a -local build; descriptions and comments do not count."""
     properties = properties or {}
-    if any("-local" in version for version in resolved_versions(path, properties)):
+    if any("-local" in version.lower() for version in resolved_versions(path, properties)):
         return True
     for element in ET.parse(path).getroot().iter():
         for name in ("Include", "Update"):
-            if "-local" in resolve_properties(element.attrib.get(name, ""), properties):
+            if any("-local" in value.lower() for value in expand_properties(element.attrib.get(name, ""), properties)):
                 return True
     return False
 
@@ -211,8 +229,11 @@ def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
         try:
             if references_local_build(path, properties):
                 problems.append(f"{path.name} references a -local build")
-            if not prerelease and any(_PRERELEASE.search(version) for version in resolved_versions(path, properties)):
+            versions = resolved_versions(path, properties)
+            if not prerelease and any(_SEMVER_LABEL.search(version) for version in versions):
                 problems.append(f"{path.name} pins a pre-release package")
+            if not prerelease and any("$(" in version for version in versions):
+                problems.append(f"{path.name} has a version that does not resolve to a declared value (an unknown, cyclic or oversized property)")
         except ET.ParseError:
             problems.append(f"{path.name} is not well-formed XML")
     if problems:

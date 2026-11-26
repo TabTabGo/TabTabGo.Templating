@@ -42,6 +42,7 @@ public sealed class RealPathTests : IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             Assert.Skip("this platform or account cannot create symbolic links");
+            return;
         }
     }
 
@@ -119,6 +120,7 @@ public sealed class RealPathTests : IDisposable
         if (Environment.UserName == "root")
         {
             Assert.Skip("the root user ignores directory permissions");
+            return;
         }
 
         var locked = Path.Combine(_root, "locked");
