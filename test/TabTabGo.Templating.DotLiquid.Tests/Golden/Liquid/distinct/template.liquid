@@ -1,0 +1,1 @@
+{% assign d = strs | Distinct %}{% for x in d %}{{ x }},{% endfor %}|{% assign i = ints | Distinct %}{% for x in i %}{{ x }},{% endfor %}|{% assign h = hashes | Distinct %}{% for x in h %}{{ x.k }},{% endfor %}

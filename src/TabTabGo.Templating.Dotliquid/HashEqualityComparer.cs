@@ -1,43 +1,14 @@
 ﻿using DotLiquid;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using TabTabGo.Templating.Liquid.Internal;
 
-namespace TabTabGo.Templating.Liquid
+namespace TabTabGo.Templating.Liquid;
+
+/// <summary>Compares hashes by content: the same keys with equal values (numbers by value, nested hashes and lists by content).</summary>
+public class HashEqualityComparer : IEqualityComparer<Hash>
 {
-    public class HashEqualityComparer : IEqualityComparer<Hash>
-    {
-        public bool Equals(Hash x, Hash y)
-        {
-            foreach (var key in x.Keys)
-            {
-                if (!y.ContainsKey(key))
-                {
-                    return false;
-                }
+    /// <inheritdoc />
+    public bool Equals(Hash? x, Hash? y) => ValueSemantics.Equals(x, y);
 
-                if (x[key] != y[key])
-                {
-                    return false;
-                }
-            }
-
-            foreach (var key in y.Keys)
-            {
-                if (!x.ContainsKey(key))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        public int GetHashCode(Hash obj)
-        {
-            return obj.GetHashCode();
-        }
-    }
+    /// <inheritdoc />
+    public int GetHashCode(Hash obj) => ValueSemantics.GetHashCode(obj);
 }

@@ -1,30 +1,29 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Version>8.0.0</Version>
-    <Company>TabTabGo</Company>
-    <Authors>TabTabGo</Authors>
-    <Description>Abstract implementation of TabTabGo's Templeting Engine</Description>
-    <Copyright>Copyright 2024</Copyright>
-    <LangVersion>default</LangVersion>
-    <Nullable>enable</Nullable>
-    <PackageIcon>logo@32.png</PackageIcon>
+    <Description>Abstract implementation of TabTabGo's Templating engine</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>Templating</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Common.Logging.Core" Version="3.4.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\assets\logo@32.png">
-      <Pack>True</Pack>
-      <PackagePath></PackagePath>
-      <Link>logo@32.png</Link>
-    </None>
+    <InternalsVisibleTo Include="TabTabGo.Templating.Dotliquid" />
+    <InternalsVisibleTo Include="TabTabGo.Templating.OpenXml" />
+    <InternalsVisibleTo Include="TabTabGo.Templating.Tests" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\assets\logo@32.png" Pack="true" PackagePath="" Link="logo@32.png" />
+    <None Include="README.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+
 </Project>

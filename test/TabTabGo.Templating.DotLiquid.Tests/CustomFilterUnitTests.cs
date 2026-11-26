@@ -1,4 +1,4 @@
-﻿
+
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -11,6 +11,7 @@ using Xunit;
 namespace TabTabGo.Templating.DotLiquid.Tests
 {
     
+    [Collection("liquid-static")]
     public class CustomFilterUnitTests
     {
         [Fact]
@@ -19,7 +20,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var json = File.ReadAllText(AppContext.BaseDirectory+ "/../../../json/countryName.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/countryName.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(json);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(json)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
             var output = "United Arab Emirates";

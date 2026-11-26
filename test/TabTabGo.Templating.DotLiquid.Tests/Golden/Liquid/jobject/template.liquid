@@ -1,0 +1,1 @@
+{% assign j = doc | ConvertToJObject %}[{{ j | JSelectTokenValue: '$.s' }}][{{ j | JSelectTokenValue: '$.a.b' }}][{{ j | JSelectToken: '$.s' }}]{% assign v = j | JSelectTokenValues: '$.arr[*]' %}{% for y in v %}{{ y }},{% endfor %}|{{ 'a"b' | EscapeJsonString }}

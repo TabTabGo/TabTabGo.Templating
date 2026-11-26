@@ -1,91 +1,97 @@
-﻿using Humanizer;
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
+﻿using System.Globalization;
 using System.Text;
-using System.Threading.Tasks;
+using Humanizer;
 
 namespace TabTabGo.Templating.Liquid.Extensions;
+
+/// <summary>Number-to-words helpers (English and Arabic) used by the <c>ToWords</c> filter.</summary>
 public static class HumanizerExtensions
 {
-    public static readonly Dictionary<string, string> NumberSeparators = new Dictionary<string, string>()
+    /// <summary>The word that joins the integer and fraction parts, per language.</summary>
+    public static readonly Dictionary<string, string> NumberSeparators = new()
     {
-        {"ar", "نقطة"},
-        {"en", "points"}
+        { "ar", "نقطة" },
+        { "en", "points" },
     };
 
+    /// <summary>
+    /// Spells a number: the number is rounded to two fraction digits first (1.999 is "Two"), then split into integer and fraction words.
+    /// English output is capitalised for every English culture (<c>en</c>, <c>en-US</c>, ...).
+    /// </summary>
+    /// <param name="number">The number.</param>
+    /// <param name="culture">Culture name.</param>
+    /// <param name="grammaticalGender">Gender for languages that need one.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The integer part does not fit a 64-bit integer.</exception>
     public static string ToWords(this decimal number, string culture, GrammaticalGender grammaticalGender = GrammaticalGender.Neuter)
     {
         var cultureInfo = CultureInfo.CreateSpecificCulture(culture);
-        var integer = Math.Truncate(number).ToLong().ToWords(grammaticalGender, cultureInfo);
-        var shouldCapitalize = culture == "en";
-        var fraction = number.GetFraction();
+        var rounded = Math.Round(number, 2);
+        var truncated = Math.Truncate(rounded);
+        if (truncated > long.MaxValue || truncated < long.MinValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(number), "The number is too large to spell.");
+        }
+
+        var capitalise = cultureInfo.TwoLetterISOLanguageName == "en";
+        var integer = truncated.ToLong().ToWords(grammaticalGender, cultureInfo);
+        var fraction = rounded.GetFraction();
         if (fraction == 0)
-            return (shouldCapitalize ? integer.Capitalize() : integer);
+        {
+            return capitalise ? integer.Capitalize() : integer;
+        }
 
-        var symbol = cultureInfo.GetSeparatorAsWords();
         var fractionWords = fraction.ToWords(grammaticalGender, cultureInfo);
-        fractionWords = shouldCapitalize ? fractionWords.Capitalize() : fractionWords;
-
-        return $"{(shouldCapitalize ? integer.Capitalize() : integer)}{symbol}{fractionWords}";
+        return $"{(capitalise ? integer.Capitalize() : integer)}{cultureInfo.GetSeparatorAsWords()}{(capitalise ? fractionWords.Capitalize() : fractionWords)}";
     }
 
-    private static string Capitalize(this string input)
+    /// <summary>Capitalises every word (and hyphenated part) except "and"; empty words are skipped.</summary>
+    internal static string Capitalize(this string input)
     {
-        var words = input.Split(' ');
         var result = new StringBuilder();
-
-        foreach (var word in words)
+        foreach (var word in input.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         {
-            bool isExcluded = word.Equals("and", StringComparison.OrdinalIgnoreCase);
+            if (result.Length > 0)
+            {
+                result.Append(' ');
+            }
 
-            if (isExcluded)
+            if (word.Equals("and", StringComparison.OrdinalIgnoreCase))
             {
                 result.Append(word);
             }
-            else if (word.Contains('-'))
-            {
-                var subWords = word.Split('-');
-                for (int i = 0; i < subWords.Length; i++)
-                {
-                    string subWord = subWords[i];
-                    string capitalizedSubWord = char.ToUpper(subWord[0]) + subWord.Substring(1).ToLower();
-                    result.Append(capitalizedSubWord);
-
-                    if (i < subWords.Length - 1)
-                    {
-                        result.Append('-');
-                    }
-                }
-            }
             else
             {
-                string capitalizedWord = char.ToUpper(word[0]) + word.Substring(1).ToLower();
-                result.Append(capitalizedWord);
+                result.Append(string.Join('-', word.Split('-').Select(CapitaliseWord)));
             }
-
-            result.Append(' ');
         }
 
-        return result.ToString().TrimEnd();
+        return result.ToString();
     }
+
+    private static string CapitaliseWord(string word) => word.Length == 0 ? word : char.ToUpper(word[0], CultureInfo.InvariantCulture) + word[1..].ToLowerInvariant();
+
+    /// <summary>The separator word between integer and fraction, surrounded by spaces (<c> points </c>, <c> dot </c>).</summary>
+    /// <param name="cultureInfo">The culture.</param>
     public static string GetSeparatorAsWords(this CultureInfo cultureInfo)
     {
         if (NumberSeparators.TryGetValue(cultureInfo.TwoLetterISOLanguageName, out var numberSeparator))
+        {
             return $" {numberSeparator} ";
+        }
 
-        if (cultureInfo.NumberFormat.NumberDecimalSeparator == ".")
-            return " dot ";
-
-        return $"{cultureInfo.NumberFormat.NumberDecimalSeparator} ";
+        return cultureInfo.NumberFormat.NumberDecimalSeparator == "." ? " dot " : $"{cultureInfo.NumberFormat.NumberDecimalSeparator} ";
     }
 
-    public static long ToLong(this decimal d) => Decimal.ToInt64(d);
+    /// <summary>Truncates a decimal to a 64-bit integer.</summary>
+    /// <param name="d">The number.</param>
+    public static long ToLong(this decimal d) => decimal.ToInt64(d);
+
+    /// <summary>The fraction digits of a number as an integer (<c>12.345</c> with 2 digits is 35).</summary>
+    /// <param name="d">The number.</param>
+    /// <param name="digits">Number of fraction digits kept.</param>
     public static long GetFraction(this decimal d, int digits = 2)
     {
-        decimal roundedFraction = Math.Round(Math.Abs(d) % 1, digits);
-        long fraction = (long)(roundedFraction * (decimal)Math.Pow(10, digits));
-        return fraction;
+        var roundedFraction = Math.Round(Math.Abs(d) % 1, digits);
+        return (long)(roundedFraction * (decimal)Math.Pow(10, digits));
     }
 }

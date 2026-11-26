@@ -24,7 +24,7 @@ public class ChartSheetCompatibilityTests
             using var document = SpreadsheetDocument.Open(result, false);
             var workbookPart = Assert.IsType<WorkbookPart>(document.WorkbookPart);
             var worksheetPart = Assert.Single(workbookPart.WorksheetParts);
-            var cell = Assert.Single(worksheetPart.Worksheet.Descendants<Cell>());
+            var cell = Assert.Single(worksheetPart.Worksheet!.Descendants<Cell>());
 
             Assert.Equal("Processed", cell.InlineString?.Text?.Text);
             Assert.Single(workbookPart.GetPartsOfType<ChartsheetPart>());

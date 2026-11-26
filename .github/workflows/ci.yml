@@ -1,0 +1,63 @@
+name: ci
+
+# Build, test, vulnerability gate and pack smoke for pull requests and branch pushes (spec section 8.1).
+# No secrets, no environment, no publishing: safe for pull requests from forks.
+# Publishing lives only in publish.yml and is driven by tags.
+
+on:
+  pull_request:
+    branches: [master, 'features/**', 'releases/**']
+  push:
+    branches: [master, 'features/**', 'releases/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    # The job name is the required status check ("ci") of the branch ruleset.
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET (version from global.json)
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          global-json-file: global.json
+
+      - name: Self-test the release scripts
+        run: python3 -m unittest discover .github/scripts
+
+      - name: Restore
+        run: dotnet restore TabTabGo.Templating.sln --locked-mode # packages.lock.json is committed (central package management)
+
+      - name: Build
+        run: |
+          extra=""
+          if grep -q '<TtgWarnAsError>true</TtgWarnAsError>' Directory.Build.props; then extra="-warnaserror"; fi
+          dotnet build TabTabGo.Templating.sln -c Release --no-restore $extra
+
+      - name: "Test with coverage (gating: 85 % lines, 75 % branches per package)"
+        run: python3 .github/scripts/run_tests.py --no-build
+
+      - name: Vulnerability gate
+        shell: bash # explicit shell enables pipefail
+        run: |
+          dotnet list TabTabGo.Templating.sln package --vulnerable --include-transitive --format json \
+            | python3 .github/scripts/vuln_gate.py
+
+      - name: Pack smoke (nothing is uploaded or pushed)
+        run: |
+          version="0.0.0-ci.${{ github.run_number }}"
+          dotnet pack TabTabGo.Templating.sln -c Release --no-build -p:Version="$version" -o out
+          tfm=$(grep -ho '<TargetFramework>[^<]*' Directory.Build.props | head -1 | sed 's/<TargetFramework>//')
+          python3 .github/scripts/assert_packages.py out "$version" --tfm "$tfm"

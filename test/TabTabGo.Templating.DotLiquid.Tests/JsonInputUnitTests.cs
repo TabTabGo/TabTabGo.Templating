@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Newtonsoft.Json.Linq;
 using System.IO;
 using Xunit;
@@ -6,6 +6,7 @@ using Xunit;
 namespace TabTabGo.Templating.DotLiquid.Tests
 {
     
+    [Collection("liquid-static")]
     public class JsonInputUnitTests
     {
         [Fact]
@@ -14,7 +15,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/simple.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/simple.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
 
@@ -27,7 +28,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/array.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/array.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
 
@@ -40,7 +41,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/nested.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/nested.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
 
@@ -53,7 +54,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/nestedWithArray.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/nestedWithArray.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
 
@@ -66,7 +67,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/nestedArrays.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/nestedArrays.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
 
@@ -79,7 +80,7 @@ namespace TabTabGo.Templating.DotLiquid.Tests
             var dotLiquidEngine = new Liquid.TemplatingEngine();
             var jsonStr = File.ReadAllText(AppContext.BaseDirectory + "/../../../json/stringArray.json");
             var templatePath = AppContext.BaseDirectory + "/../../../liquids/stringArray.liquid";
-            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr);
+            dynamic data = Newtonsoft.Json.JsonConvert.DeserializeObject(jsonStr)!;
 
             var renderedData = dotLiquidEngine.Render(templatePath, new { data = data });
 

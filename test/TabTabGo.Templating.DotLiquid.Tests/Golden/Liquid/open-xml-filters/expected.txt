@@ -1,0 +1,1 @@
+Number|Boolean|Date|Number|AB

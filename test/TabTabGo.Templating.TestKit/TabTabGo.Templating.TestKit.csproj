@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Golden-file helpers and fixture builders shared by the engine test projects; never packed (ADR 0005). -->
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- a library of helpers, not a test assembly: drop the test packages the folder props add -->
+  <ItemGroup>
+    <PackageReference Remove="xunit.v3" />
+    <PackageReference Remove="xunit.runner.visualstudio" />
+    <PackageReference Remove="Microsoft.NET.Test.Sdk" />
+    <PackageReference Remove="coverlet.MTP" />
+    <PackageReference Remove="NSubstitute" />
+    <Using Remove="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" />
+    <PackageReference Include="Newtonsoft.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TabTabGo.Templating.Dotliquid\TabTabGo.Templating.Dotliquid.csproj" />
+    <ProjectReference Include="..\..\src\TabTabGo.Templating.OpenXml\TabTabGo.Templating.OpenXml.csproj" />
+  </ItemGroup>
+
+</Project>

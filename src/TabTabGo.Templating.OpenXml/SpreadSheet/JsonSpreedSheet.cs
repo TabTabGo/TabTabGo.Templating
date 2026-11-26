@@ -1,203 +1,702 @@
-﻿using DocumentFormat.OpenXml;
+using System.Globalization;
+using System.Xml.Linq;
+using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
-using System;
-using System.Xml.Linq;
-using TabTabGo.IO.Utilities;
 using Newtonsoft.Json.Linq;
+using TabTabGo.Templating.OpenXml.SpreadSheet.Internal;
 
-namespace TabTabGo.Templating.OpenXml.SpreadSheet
+namespace TabTabGo.Templating.OpenXml.SpreadSheet;
+
+/// <summary>Writes a workbook described by JSON (<c>$.Workbook</c>) with the Open XML SDK.</summary>
+public class JsonSpreedSheet
 {
-    public class JsonSpreedSheet
+    /// <summary>The style index the generated stylesheet gives to dates, and the index date cells use when the JSON names none.</summary>
+    internal const uint DefaultDateStyleIndex = 5;
+
+    private const int MaxSheetNameLength = 31;
+
+    /// <summary>The most sheets this writer accepts. Excel's practical limit is far lower (memory); 255 is the hard ceiling here and keeps the id/name generation trivial.</summary>
+    internal const int MaxSheets = 255;
+
+    private const double MaxDateSerial = 2958465; // 9999-12-31
+
+    /// <summary>The last Excel column (XFD): the schema rejects a column range above it.</summary>
+    private const uint MaxColumn = 16384;
+
+    private const double FirstSafeDateSerial = 61; // 1900-03-01: the first date whose OLE serial equals the Excel serial
+    private static readonly char[] InvalidSheetNameChars = { '[', ']', ':', '*', '?', '/', '\\' };
+    private static readonly string[] ErrorLiterals = { "#N/A", "#REF!", "#VALUE!", "#DIV/0!", "#NAME?", "#NUM!", "#NULL!" };
+
+    private readonly TemplatingOptions _options;
+
+    /// <summary>Creates a writer with default <see cref="TemplatingOptions"/>.</summary>
+    public JsonSpreedSheet()
+        : this(new TemplatingOptions())
     {
-        public void CreateExcelDoc(string fileName, JObject json)
+    }
+
+    /// <summary>Creates a writer that loads data-referenced stylesheets only from <see cref="TemplatingOptions.StylesheetRoot"/>.</summary>
+    /// <param name="options">The options.</param>
+    public JsonSpreedSheet(TemplatingOptions options)
+    {
+        _options = TemplatingOptionsValidator.Validate(options, validateRenderLimits: false);
+    }
+
+    /// <summary>Writes the workbook described by <paramref name="json"/> into a file (replaced when it exists).</summary>
+    /// <param name="fileName">The target path.</param>
+    /// <param name="json">The workbook definition (<c>$.Workbook</c>).</param>
+    public void CreateExcelDoc(string fileName, JObject json)
+    {
+        // build in memory first: a definition that fails (bad sheet, style, error literal, stylesheet path) must not leave a half-written or empty file behind
+        using var buffer = new MemoryStream();
+        CreateExcelDoc(buffer, json);
+        using var file = new FileStream(fileName, FileMode.Create, FileAccess.Write);
+        buffer.Position = 0;
+        buffer.CopyTo(file);
+    }
+
+    /// <summary>
+    /// Writes the workbook described by <paramref name="json"/> into <paramref name="stream"/> (no temp file). Every entry of
+    /// <c>Workbook.Sheets</c> becomes a sheet; the single <c>Workbook.Worksheet</c> definition is used for each of them (X-17).
+    /// </summary>
+    /// <param name="stream">A writable, seekable stream; it stays open.</param>
+    /// <param name="json">The workbook definition (<c>$.Workbook</c>).</param>
+    public void CreateExcelDoc(Stream stream, JObject json)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(json);
+
+        // validate the sheet list before the package is created; failures later on (stylesheet, cell values) can still leave a partial stream, which is why the
+        // file overload builds in memory and writes the file only on success
+        var sheetsToken = json.SelectToken("$.Workbook.Sheets");
+        if (sheetsToken is JContainer { Count: > MaxSheets })
         {
-            using SpreadsheetDocument
-                document = SpreadsheetDocument.Create(fileName, SpreadsheetDocumentType.Workbook);
-            WorkbookPart workbookPart = document.AddWorkbookPart();
-            workbookPart.Workbook = new Workbook();
-
-            WorksheetPart worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
-            worksheetPart.Worksheet = new Worksheet();
-
-            // Adding style
-            WorkbookStylesPart stylePart = workbookPart.AddNewPart<WorkbookStylesPart>();
-            var jToken = json.SelectToken("$.Workbook.Stylesheets");
-            if (jToken?["TemplatePath"] != null)
-            {
-                var xStyle = XDocument.Load(PathUtility.ResolvePath(jToken["TemplatePath"]?.ToString()!));
-                stylePart.Stylesheet = new Stylesheet(xStyle.ToString());
-            }
-            else
-            {
-                stylePart.Stylesheet = GenerateStylesheet(jToken);
-            }
-
-            stylePart.Stylesheet.Save();
-
-
-            // Setting up columns
-            var jColumns = json.SelectToken("$.Workbook.Worksheet.Columns");
-            var columns = new Columns();
-            foreach (JToken jColumn in jColumns)
-            {
-                var column = new Column()
-                {
-                    Min = UInt32Value.FromUInt32((uint)jColumn["Min"]),
-                    Max = UInt32Value.FromUInt32((uint)jColumn["Max"]),
-                    CustomWidth = false,
-                    BestFit = BooleanValue.FromBoolean((bool)jColumn["BestFit"]!)
-                };
-
-                if (jColumn["Width"] != null)
-                {
-                    column.Width = DoubleValue.FromDouble((double)jColumn["Width"]!);
-                    column.CustomWidth = true;
-                }
-
-                columns.AppendChild(column);
-            }
-
-            worksheetPart.Worksheet.AppendChild(columns);
-
-            Sheets sheets = workbookPart.Workbook.AppendChild(new Sheets());
-            var jSheets = json.SelectToken("$.Workbook.Sheets");
-            foreach (dynamic jSheet in jSheets)
-            {
-                sheets.Append(
-                    new Sheet()
-                    {
-                        Id = workbookPart.GetIdOfPart(worksheetPart),
-                        SheetId = UInt32Value.FromUInt32((uint)jSheet.SheetId),
-                        Name = StringValue.FromString((string)jSheet.Name)
-                    });
-            }
-
-            workbookPart.Workbook.Save();
-
-            SheetData sheetData = worksheetPart.Worksheet.AppendChild(new SheetData());
-
-            // Constructing header
-            var jRows = json.SelectToken("$.Workbook.Worksheet.SheetData.Rows");
-            var styleMap = json.SelectToken("$.StyleMap");
-            var iRow = -1; // to ignore header
-            foreach (JToken jRow in jRows)
-            {
-                var row = new Row { Collapsed = Convert.ToBoolean(jRow["Collapsed"]) };
-                var jCells = jRow.SelectToken("Cells");
-
-                if (jCells != null && styleMap != null)
-                    foreach (JToken jCell in jCells)
-                    {
-                        row.AppendChild(this.ConstructCell(jCell, styleMap, iRow));
-                    }
-
-                iRow++;
-                sheetData.AppendChild(row);
-            }
-
-            worksheetPart.Worksheet.Save();
+            throw new ArgumentException($"The workbook may define at most {MaxSheets} sheets.", nameof(json)); // counted before any copy of the list
         }
 
-        /// <summary>
-        /// The construct cell.
-        /// </summary>
-        /// <param name="jCell">
-        /// The j cell.
-        /// </param>
-        /// <param name="styleMap"></param>
-        /// <param name="rowIndex"></param>
-        /// <returns>
-        /// The <see cref="Cell"/>.
-        /// </returns>
-        private Cell ConstructCell(JToken jCell, JToken styleMap, int rowIndex)
+        var jSheets = sheetsToken?.Children().ToList() ?? new List<JToken>();
+        if (jSheets.Count == 0)
         {
-            if (!Enum.TryParse(jCell["DataType"]?.ToString(), out CellValues dataType))
+            throw new ArgumentException("The workbook must define at least one sheet ($.Workbook.Sheets is missing or empty).", nameof(json));
+        }
+
+        // a wrong JSON shape is the caller's data error: ArgumentException, never the InvalidOperationException/InvalidCastException Json.NET raises when it is indexed (messages name the path only, never a value)
+        if (sheetsToken is not JArray || jSheets.Any(sheet => sheet is not JObject))
+        {
+            throw new ArgumentException("$.Workbook.Sheets must be an array of objects.", nameof(json));
+        }
+
+        var sheetIds = ResolveSheetIds(jSheets);
+        var sheetNames = ResolveSheetNames(jSheets);
+        ValidateWorksheetShape(json);
+
+        using var document = SpreadsheetDocument.Create(stream, SpreadsheetDocumentType.Workbook);
+        var workbookPart = document.AddWorkbookPart();
+        workbookPart.Workbook = new Workbook();
+
+        var stylePart = workbookPart.AddNewPart<WorkbookStylesPart>();
+        var styleToken = json.SelectToken("$.Workbook.Stylesheets");
+        uint? defaultDateStyle;
+        uint styleCount;
+        if (styleToken?["TemplatePath"] is { } templatePath)
+        {
+            stylePart.Stylesheet = new Stylesheet(LoadStylesheet(templatePath.ToString()).ToString());
+
+            // index 5 means "date" only in the generated stylesheet; a loaded one keeps it only when it has that many formats
+            styleCount = (uint)(stylePart.Stylesheet.CellFormats?.Elements<CellFormat>().Count() ?? 0);
+            defaultDateStyle = styleCount > DefaultDateStyleIndex ? DefaultDateStyleIndex : null;
+        }
+        else
+        {
+            stylePart.Stylesheet = GenerateStylesheet();
+            styleCount = (uint)stylePart.Stylesheet.CellFormats!.Elements<CellFormat>().Count();
+            defaultDateStyle = DefaultDateStyleIndex;
+        }
+
+        stylePart.Stylesheet.Save();
+
+        var sheets = workbookPart.Workbook.AppendChild(new Sheets());
+        var styleMap = json.SelectToken("$.StyleMap") as JArray ?? new JArray(); // no StyleMap means every cell uses style 0, not "write no cells"
+        for (var i = 0; i < jSheets.Count; i++)
+        {
+            var worksheetPart = workbookPart.AddNewPart<WorksheetPart>();
+            worksheetPart.Worksheet = BuildWorksheet(json, styleMap, defaultDateStyle, styleCount);
+            worksheetPart.Worksheet.Save();
+            sheets.Append(new Sheet
             {
-                dataType = CellValues.String;
+                Id = workbookPart.GetIdOfPart(worksheetPart),
+                SheetId = UInt32Value.FromUInt32(sheetIds[i]),
+                Name = StringValue.FromString(sheetNames[i]),
+            });
+        }
+
+        workbookPart.Workbook.Save();
+    }
+
+    /// <summary>
+    /// Requires <c>$.Workbook.Worksheet.SheetData.Rows</c> to be an array (use an empty array for no rows) and every column, row and cell to be an object, so that a workbook of
+    /// the wrong shape fails as <see cref="ArgumentException"/> before anything is written. A JSON <c>null</c> <c>Columns</c> or <c>Cells</c> is "not given".
+    /// </summary>
+    /// <param name="json">The workbook definition.</param>
+    private static void ValidateWorksheetShape(JObject json)
+    {
+        if (json.SelectToken("$.Workbook.Worksheet.SheetData.Rows") is not JArray rows)
+        {
+            throw new ArgumentException("$.Workbook.Worksheet.SheetData.Rows is required and must be an array (use an empty array for no rows).", nameof(json));
+        }
+
+        var columns = json.SelectToken("$.Workbook.Worksheet.Columns");
+        if (columns is { Type: not JTokenType.Null } && (columns is not JArray columnArray || columnArray.Any(column => column is not JObject)))
+        {
+            throw new ArgumentException("$.Workbook.Worksheet.Columns must be an array of objects.", nameof(json));
+        }
+
+        foreach (var row in rows)
+        {
+            if (row is not JObject jRow)
+            {
+                throw new ArgumentException("Every entry of $.Workbook.Worksheet.SheetData.Rows must be an object.", nameof(json));
             }
 
-            var cell = new Cell();
-            if (dataType == CellValues.Date)
+            if (jRow["Cells"] is { Type: not JTokenType.Null } cells && (cells is not JArray cellArray || cellArray.Any(cell => cell is not JObject)))
             {
-                if (string.IsNullOrEmpty(jCell["CellValue"]?.ToString()))
+                throw new ArgumentException("The Cells of a row must be an array of objects.", nameof(json));
+            }
+        }
+    }
+
+    /// <summary>Explicit ids are kept (and must be unique, whole numbers from 1); generated ids skip every explicit one so they never collide (linear: one running counter).</summary>
+    private static List<uint> ResolveSheetIds(List<JToken> jSheets)
+    {
+        var used = new HashSet<uint>();
+        var ids = new uint?[jSheets.Count];
+        for (var i = 0; i < jSheets.Count; i++)
+        {
+            ids[i] = ReadSheetId(jSheets[i]["SheetId"]);
+            if (ids[i] is { } explicitId && !used.Add(explicitId))
+            {
+                throw new ArgumentException("A SheetId is used by more than one sheet.", "json");
+            }
+        }
+
+        var result = new List<uint>(jSheets.Count);
+        uint next = 1; // never goes back: each generated id is the sheet's position, or later, past every id already taken
+        for (var i = 0; i < ids.Length; i++)
+        {
+            if (ids[i] is { } known)
+            {
+                result.Add(known);
+                continue;
+            }
+
+            next = Math.Max(next, (uint)(i + 1));
+            while (used.Contains(next))
+            {
+                next++;
+            }
+
+            used.Add(next);
+            result.Add(next++);
+        }
+
+        return result;
+    }
+
+    /// <summary>The largest SheetId the schema allows (the validator rejects anything above 65534).</summary>
+    internal const uint MaxSheetId = 65534;
+
+    private static uint? ReadSheetId(JToken? token) => ReadWholeNumber(token, "SheetId", 1, MaxSheetId);
+
+    /// <summary>
+    /// A whole number read from JSON (an integer, an integral float, or numeric text) within <paramref name="min"/> and <paramref name="max"/>; null for a missing or null value.
+    /// Every failure (a BigInteger beyond any type, negative, fractional, NaN, text) is an <see cref="ArgumentException"/>, never an InvalidCast, Format or Overflow exception.
+    /// </summary>
+    private static uint? ReadWholeNumber(JToken? token, string what, double min, double max)
+    {
+        if (token == null || token.Type is JTokenType.Null or JTokenType.Undefined) // a JSON null means "not given"
+        {
+            return null;
+        }
+
+        var number = ReadDouble(token, what);
+        if (!(number >= min && number <= max) || number != Math.Floor(number))
+        {
+            throw new ArgumentException($"{what} must be a whole number from {min.ToString("0", CultureInfo.InvariantCulture)} to {max.ToString("0", CultureInfo.InvariantCulture)}.", "json");
+        }
+
+        return (uint)number;
+    }
+
+    private static double ReadDouble(JToken token, string what)
+    {
+        try
+        {
+            switch (token.Type)
+            {
+                case JTokenType.Integer:
+                case JTokenType.Float:
+                    return ((JValue)token).Value switch
+                    {
+                        System.Numerics.BigInteger big => (double)big, // above 2^63 Newtonsoft keeps a BigInteger, which Convert cannot read
+                        { } other => Convert.ToDouble(other, CultureInfo.InvariantCulture),
+                        _ => throw new ArgumentException($"{what} must be a number.", "json"),
+                    };
+                case JTokenType.String when double.TryParse(token.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed):
+                    return parsed;
+                default:
+                    throw new ArgumentException($"{what} must be a number.", "json");
+            }
+        }
+        catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+        {
+            throw new ArgumentException($"{what} must be a number.", "json"); // no inner exception: its message quotes the value
+        }
+    }
+
+    private static bool ReadBoolean(JToken? token, string what)
+    {
+        if (token == null || token.Type is JTokenType.Null or JTokenType.Undefined) // a JSON null means "not given"
+        {
+            return false;
+        }
+
+        if (token is JValue { Value: bool flag })
+        {
+            return flag;
+        }
+
+        return token.ToString().Trim().ToLowerInvariant() switch
+        {
+            "true" or "1" => true,
+            "false" or "0" => false,
+            _ => throw new ArgumentException($"{what} must be true or false.", "json"),
+        };
+    }
+
+    /// <summary>Explicit names are validated and must be unique ignoring case; a sheet without a name gets the first free "SheetN" from its position (linear: one running counter).</summary>
+    private static List<string> ResolveSheetNames(List<JToken> jSheets)
+    {
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new string?[jSheets.Count];
+        for (var i = 0; i < jSheets.Count; i++)
+        {
+            if (jSheets[i]["Name"] is JContainer)
+            {
+                throw new ArgumentException("A sheet name must be text.", "json");
+            }
+
+            names[i] = (string?)jSheets[i]["Name"];
+            if (names[i] is { } explicitName && !used.Add(ValidateSheetName(explicitName)))
+            {
+                throw new ArgumentException("A sheet name is used more than once (names are compared ignoring case).", "json");
+            }
+        }
+
+        var result = new List<string>(jSheets.Count);
+        var next = 1;
+        for (var i = 0; i < names.Length; i++)
+        {
+            if (names[i] is { } known)
+            {
+                result.Add(known);
+                continue;
+            }
+
+            next = Math.Max(next, i + 1);
+            while (!used.Add("Sheet" + next.ToString(CultureInfo.InvariantCulture)))
+            {
+                next++;
+            }
+
+            result.Add("Sheet" + next.ToString(CultureInfo.InvariantCulture));
+            next++;
+        }
+
+        return result;
+    }
+
+    private static string ValidateSheetName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)
+            || name.Length > MaxSheetNameLength
+            || name.IndexOfAny(InvalidSheetNameChars) >= 0
+            || HasControlOrLoneSurrogate(name)
+            || name[0] == '\'' || name[^1] == '\''
+            || name.Equals("History", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"A sheet name must be 1 to {MaxSheetNameLength} characters, may not contain any of [ ] : * ? / \\, may not start or end with an apostrophe, may not be 'History', and may not contain control characters or lone surrogates.",
+                "json");
+        }
+
+        return name;
+    }
+
+    private static Worksheet BuildWorksheet(JObject json, JArray styleMap, uint? defaultDateStyle, uint styleCount)
+    {
+        var worksheet = new Worksheet();
+
+        var columns = new Columns();
+        foreach (var jColumn in json.SelectToken("$.Workbook.Worksheet.Columns")?.Children() ?? Enumerable.Empty<JToken>())
+        {
+            // Excel columns start at 1; both bounds are required, whole numbers, and Min may not exceed Max
+            var min = ReadWholeNumber(jColumn["Min"], "Column Min", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+            var max = ReadWholeNumber(jColumn["Max"], "Column Max", 1, MaxColumn) ?? throw new ArgumentException("Every column needs a Min and a Max.", "json");
+            if (min > max)
+            {
+                throw new ArgumentException("Column Min may not be greater than Max.", "json");
+            }
+
+            var column = new Column
+            {
+                Min = UInt32Value.FromUInt32(min),
+                Max = UInt32Value.FromUInt32(max),
+                CustomWidth = false,
+                BestFit = BooleanValue.FromBoolean(ReadBoolean(jColumn["BestFit"], "Column BestFit")), // a missing BestFit is false
+            };
+
+            if (jColumn["Width"] is { } given && given.Type is not (JTokenType.Null or JTokenType.Undefined)) // a JSON null means "no width given"
+            {
+                var width = ReadDouble(given, "Column Width");
+                if (!(width >= 0 && width <= 255)) // the schema allows 0 to 255; NaN, infinity, negative and huge values are refused
                 {
-                    cell.CellValue = new CellValue(string.Empty);
-                }
-                else if (DateTime.TryParse(jCell["CellValue"]?.ToString(), out var date))
-                {
-                    cell.CellValue = new CellValue(date.ToUniversalTime().ToString());
+                    throw new ArgumentException("Column Width must be a number from 0 to 255.", "json");
                 }
 
+                column.Width = DoubleValue.FromDouble(width);
+                column.CustomWidth = true;
+            }
+
+            columns.AppendChild(column);
+        }
+
+        if (columns.HasChildren)
+        {
+            worksheet.AppendChild(columns);
+        }
+
+        var sheetData = worksheet.AppendChild(new SheetData());
+        var rowIndex = -1; // the first row is the header and does not alternate
+        uint rowNumber = 0;
+        foreach (var jRow in json.SelectToken("$.Workbook.Worksheet.SheetData.Rows")?.Children() ?? Enumerable.Empty<JToken>())
+        {
+            rowNumber++;
+            var row = new Row { RowIndex = rowNumber, Collapsed = ReadBoolean(jRow["Collapsed"], "Row Collapsed") };
+            if (jRow.SelectToken("Cells") is { } cells)
+            {
+                var column = 0;
+                foreach (var jCell in cells)
+                {
+                    var cell = ConstructCell(jCell, styleMap, rowIndex, defaultDateStyle, styleCount);
+                    cell.CellReference = Utility.NextColumn(++column) + rowNumber.ToString(CultureInfo.InvariantCulture);
+                    row.AppendChild(cell);
+                }
+            }
+
+            rowIndex++;
+            sheetData.AppendChild(row);
+        }
+
+        return worksheet;
+    }
+
+    private static bool HasControlOrLoneSurrogate(string name)
+    {
+        for (var i = 0; i < name.Length; i++)
+        {
+            if (char.IsControl(name[i]))
+            {
+                return true;
+            }
+
+            if (char.IsHighSurrogate(name[i]) && i + 1 < name.Length && char.IsLowSurrogate(name[i + 1]))
+            {
+                i++;
+            }
+            else if (char.IsSurrogate(name[i]))
+            {
+                return true; // a lone surrogate cannot be written to XML
+            }
+        }
+
+        return false;
+    }
+
+    private static Cell ConstructCell(JToken jCell, JArray styleMap, int rowIndex, uint? defaultDateStyle, uint styleCount)
+    {
+        var dataType = ParseDataType(jCell["DataType"]?.ToString());
+        var alternative = rowIndex > 0 && rowIndex % 2 != 0;
+        var value = jCell["CellValue"];
+        var cell = new Cell();
+
+        if (dataType == CellValues.Date)
+        {
+            // a date is stored as an Excel serial number (a number cell with a date style), never as culture text (X-4)
+            var serial = DateSerial(value);
+            if (serial.Length > 0)
+            {
+                cell.CellValue = new CellValue(serial);
                 cell.DataType = new EnumValue<CellValues>(CellValues.Number);
-                cell.StyleIndex = this.GetStyleIndex(jCell, styleMap, (rowIndex > 0 && (rowIndex % 2) != 0));
-                if (cell.StyleIndex.Value == 0)
-                {
-                    cell.StyleIndex = UInt32Value.FromUInt32(5);
-                }
             }
-            else
+
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
+            if (cell.StyleIndex.Value == 0 && defaultDateStyle is { } dateStyle)
             {
-                //case CellValues.Boolean:
-                //      case CellValues.Error:
-                //    case CellValues.Number:
-                //  case CellValues.InlineString:
-                //  case CellValues.String:
-                // default:
-                cell.CellValue = new CellValue(jCell["CellValue"]!.ToString());
-                cell.DataType = new EnumValue<CellValues>(dataType);
-                cell.StyleIndex = GetStyleIndex(jCell, styleMap, (rowIndex > 0 && rowIndex % 2 != 0));
+                cell.StyleIndex = UInt32Value.FromUInt32(dateStyle);
             }
 
             return cell;
         }
 
-        private UInt32Value GetStyleIndex(JToken jCell, JToken styleMap, bool useAlternative = false)
+        var text = CellValueWriter.ToValidXml(value is JValue { Value: null } or null ? string.Empty : Invariant(value));
+        if (dataType == CellValues.Boolean && !string.IsNullOrWhiteSpace(text))
         {
-            if (jCell["StyleIndex"] != null)
+            text = text.Trim().ToLowerInvariant() switch
             {
-                return UInt32Value.FromUInt32(Convert.ToUInt32(jCell["StyleIndex"]));
-            }
-
-            string? format = null;
-            if (jCell["Format"] != null)
-            {
-                format = jCell["Format"]?.ToString().Trim().Replace(" ", "");
-            }
-
-            if (string.IsNullOrEmpty(format))
-            {
-                format = "Normal";
-            }
-
-            var map = styleMap.SelectToken($"[?(@.Key == '{format}')]");
-            if (map != null && map["Key"]?.ToString() == format)
-            {
-                if (useAlternative && map["SAlternativeIndex"] != null)
-                {
-                    return UInt32Value.FromUInt32(Convert.ToUInt32(map["SAlternativeIndex"]));
-                }
-
-                return UInt32Value.FromUInt32(Convert.ToUInt32(map["SIndex"]));
-            }
-
-            return UInt32Value.FromUInt32(0);
+                "true" or "1" => "1",
+                "false" or "0" => "0",
+                _ => throw new ArgumentException("A Boolean cell must hold true, false, 1 or 0.", "json"),
+            };
+        }
+        else if (dataType == CellValues.Number && !string.IsNullOrWhiteSpace(text))
+        {
+            // the canonical invariant round-trip form; text that is not a finite number would write an invalid workbook
+            text = double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number)
+                ? number.ToString("R", CultureInfo.InvariantCulture)
+                : throw new ArgumentException("A Number cell must hold a finite number.", "json");
         }
 
-        /// <summary>
-        /// The generate stylesheet.
-        /// </summary>
-        /// <param name="stylesheets">
-        /// The stylesheets.
-        /// </param>
-        /// <returns>
-        /// The <see cref="Stylesheet"/>.
-        /// </returns>
-        private Stylesheet GenerateStylesheet(JToken stylesheets)
+        if (dataType == CellValues.InlineString || dataType == CellValues.SharedString)
         {
-            Stylesheet styleSheet = new Stylesheet();
-            // Constructing fonts
-            return styleSheet;
+            // there is no shared-string table in this mode, so a shared string is written inline; an inline string needs its <is> element
+            cell.DataType = new EnumValue<CellValues>(CellValues.InlineString);
+            cell.InlineString = new InlineString(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
+            return cell;
         }
+
+        if (dataType == CellValues.Error && Array.IndexOf(ErrorLiterals, text) < 0)
+        {
+            throw new ArgumentException("An Error cell must hold one of #N/A, #REF!, #VALUE!, #DIV/0!, #NAME?, #NUM!, #NULL!.", "json");
+        }
+
+        if (string.IsNullOrWhiteSpace(text) && (dataType == CellValues.Number || dataType == CellValues.Boolean))
+        {
+            // an empty number or boolean is an empty cell: <c t="n"><v/></c> is not valid (it keeps its style)
+            cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
+            return cell;
+        }
+
+        cell.CellValue = new CellValue(text);
+        cell.DataType = new EnumValue<CellValues>(dataType);
+        cell.StyleIndex = GetStyleIndex(jCell, styleMap, alternative, styleCount);
+        return cell;
+    }
+
+    /// <summary>
+    /// The Excel serial of a date cell: a date value, a date text, or a number (or numeric text) from 1 to 2958465 taken as the serial itself. Empty is empty;
+    /// anything else throws, because dropping it would lose the data without a trace.
+    /// </summary>
+    private static string DateSerial(JToken? value)
+    {
+        if (value == null || value.Type == JTokenType.Null || (value.Type == JTokenType.String && string.IsNullOrWhiteSpace(value.ToString())))
+        {
+            return string.Empty;
+        }
+
+        if (value is JValue { Value: DateTime dateTime })
+        {
+            return DateToSerial(dateTime);
+        }
+
+        if (value is JValue { Value: DateTimeOffset dateTimeOffset })
+        {
+            return DateToSerial(dateTimeOffset.UtcDateTime);
+        }
+
+        var text = value.ToString();
+        if (value.Type is JTokenType.Integer or JTokenType.Float
+            || (value.Type == JTokenType.String && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out _)))
+        {
+            var serial = ReadDouble(value, "A Date cell");
+            return serial >= 1 && serial <= MaxDateSerial
+                ? serial.ToString("R", CultureInfo.InvariantCulture)
+                : throw new ArgumentException($"A Date cell holding a number must be an Excel serial from 1 to {MaxDateSerial.ToString("0", CultureInfo.InvariantCulture)}.", "json");
+        }
+
+        return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
+            ? DateToSerial(parsed)
+            : throw new ArgumentException("A Date cell must hold a date, or an Excel serial number.", "json");
+    }
+
+    /// <summary>
+    /// The Excel serial of a date. Excel counts a 29 February 1900 that never existed, so <c>ToOADate</c> is one off before 1900-03-01; rather than guess, dates before 1900-03-01 are refused
+    /// (a number from 1 to 60 is still accepted as an explicit serial). The latest date is 9999-12-31 (serial 2958465).
+    /// </summary>
+    private static string DateToSerial(DateTime date)
+    {
+        // the range is checked on the date itself, before ToOADate: it throws OverflowException for the years 1 to 99
+        double serial;
+        try
+        {
+            serial = date < new DateTime(1900, 3, 1) ? double.NaN : date.ToOADate();
+        }
+        catch (OverflowException)
+        {
+            serial = double.NaN;
+        }
+
+        if (double.IsNaN(serial) || serial < FirstSafeDateSerial || Math.Floor(serial) > MaxDateSerial)
+        {
+            throw new ArgumentException("A Date cell must hold a date from 1900-03-01 to 9999-12-31.", "json");
+        }
+
+        return serial.ToString("R", CultureInfo.InvariantCulture);
+    }
+
+    private static string Invariant(JToken value) => value is JValue { Value: IFormattable formattable }
+        ? formattable.ToString(null, CultureInfo.InvariantCulture)
+        : value.ToString();
+
+    /// <summary>
+    /// Loads a stylesheet whose path comes from the data (S-7). The path must be relative and stay inside
+    /// <see cref="TemplatingOptions.StylesheetRoot"/> (a relative root is resolved against the application base directory, which is also the default); rooted, UNC and
+    /// traversing paths are rejected without echoing any absolute path, and the XML may not contain a DTD.
+    /// </summary>
+    private XDocument LoadStylesheet(string? requested)
+    {
+        if (string.IsNullOrWhiteSpace(requested)
+            || Path.IsPathRooted(requested)
+            || requested.StartsWith("\\\\", StringComparison.Ordinal)
+            || requested.StartsWith("//", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("The stylesheet path must be relative to the stylesheet root.", nameof(requested));
+        }
+
+        // never TemplatesPath: the folder of liquid/xlsx templates is not automatically a folder of stylesheets
+        var configured = string.IsNullOrEmpty(_options.StylesheetRoot) ? AppContext.BaseDirectory : _options.StylesheetRoot;
+        var root = Path.GetFullPath(configured, AppContext.BaseDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var full = Path.GetFullPath(Path.Combine(root, requested));
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!full.StartsWith(root, comparison))
+        {
+            throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
+        }
+
+        if (!File.Exists(full))
+        {
+            throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
+        }
+
+        try
+        {
+            // a symbolic link inside the root may point outside it: compare the real paths
+            var real = TabTabGo.Templating.Internal.RealPath.ResolveInside(root, full)
+                ?? throw new ArgumentException("The stylesheet path is outside the stylesheet root.", nameof(requested));
+
+            var settings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = _options.MaxXmlCharacters,
+            };
+
+            return GuardedRead.Read(real, stream => // the resolved path is what is opened
+            {
+                using var reader = System.Xml.XmlReader.Create(stream, settings);
+                return XDocument.Load(reader);
+            });
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // an unreadable file, a directory, a pipe: the system message carries the absolute path, ours does not (and no inner exception that could)
+            throw new FileNotFoundException("The stylesheet was not found in the stylesheet root.");
+        }
+        catch (System.Xml.XmlException)
+        {
+            // the XmlException message and SourceUri can carry the file name
+            throw new ArgumentException("The stylesheet is not well-formed XML, or it uses a DTD (not allowed).", nameof(requested));
+        }
+    }
+
+    /// <summary>
+    /// Maps the JSON data type name to <see cref="CellValues"/>. <c>CellValues</c> is a struct in Open XML SDK 3.x, so
+    /// <c>Enum.TryParse</c> throws for every cell (X-1). Unknown names fall back to <see cref="CellValues.String"/>.
+    /// </summary>
+    private static CellValues ParseDataType(string? name) => name?.Trim().ToLowerInvariant() switch
+    {
+        "number" => CellValues.Number,
+        "boolean" => CellValues.Boolean,
+        "date" => CellValues.Date,
+        "error" => CellValues.Error,
+        "sharedstring" => CellValues.SharedString,
+        "inlinestring" => CellValues.InlineString,
+        _ => CellValues.String,
+    };
+
+    private static UInt32Value GetStyleIndex(JToken jCell, JArray styleMap, bool useAlternative, uint styleCount)
+    {
+        var explicitToken = jCell["StyleIndex"];
+        if (explicitToken != null && explicitToken.Type is not (JTokenType.Null or JTokenType.Undefined)) // a JSON null means "not given": the Format lookup stays active
+        {
+            var explicitIndex = ReadWholeNumber(explicitToken, "StyleIndex", 0, uint.MaxValue) ?? 0;
+            if (explicitIndex >= Math.Max(styleCount, 1))
+            {
+                throw new ArgumentException($"A StyleIndex is outside the stylesheet's {styleCount} cell formats.", "json");
+            }
+
+            return UInt32Value.FromUInt32(explicitIndex);
+        }
+
+        var format = jCell["Format"]?.ToString().Trim().Replace(" ", string.Empty);
+        if (string.IsNullOrEmpty(format))
+        {
+            format = "Normal";
+        }
+
+        // compare the key directly: a JSONPath filter built from data breaks on a quote or a trailing backslash in the format
+        var map = styleMap.OfType<JObject>().FirstOrDefault(entry => entry["Key"]?.ToString() == format);
+        if (map != null)
+        {
+            var alternativeToken = map["SAlternativeIndex"];
+            var hasAlternative = alternativeToken != null && alternativeToken.Type is not (JTokenType.Null or JTokenType.Undefined); // null means "not given": SIndex is used
+            var mapped = useAlternative && hasAlternative
+                ? ReadWholeNumber(alternativeToken, "SAlternativeIndex", 0, uint.MaxValue) ?? 0
+                : ReadWholeNumber(map["SIndex"], "SIndex", 0, uint.MaxValue) ?? 0;
+            if (mapped >= Math.Max(styleCount, 1))
+            {
+                throw new ArgumentException($"A StyleMap index is outside the stylesheet's {styleCount} cell formats.", "json");
+            }
+
+            return UInt32Value.FromUInt32(mapped);
+        }
+
+        return UInt32Value.FromUInt32(0);
+    }
+
+    /// <summary>
+    /// The stylesheet written when the JSON names none: one font, the two mandatory fills, one border, and six cell formats where index 0 to 4
+    /// are general and index <see cref="DefaultDateStyleIndex"/> shows a date. A workbook with an empty stylesheet is not valid (X-17).
+    /// </summary>
+    private static Stylesheet GenerateStylesheet()
+    {
+        var cellFormats = new CellFormats { Count = 6 };
+        for (var i = 0; i < 5; i++)
+        {
+            cellFormats.Append(new CellFormat { NumberFormatId = 0, FontId = 0, FillId = 0, BorderId = 0, FormatId = 0 });
+        }
+
+        cellFormats.Append(new CellFormat { NumberFormatId = 14, FontId = 0, FillId = 0, BorderId = 0, FormatId = 0, ApplyNumberFormat = true });
+
+        return new Stylesheet(
+            new Fonts(new Font(new FontSize { Val = 11 }, new FontName { Val = "Calibri" })) { Count = 1 },
+            new Fills(
+                new Fill(new PatternFill { PatternType = PatternValues.None }),
+                new Fill(new PatternFill { PatternType = PatternValues.Gray125 })) { Count = 2 },
+            new Borders(new Border(new LeftBorder(), new RightBorder(), new TopBorder(), new BottomBorder(), new DiagonalBorder())) { Count = 1 },
+            new CellStyleFormats(new CellFormat { NumberFormatId = 0, FontId = 0, FillId = 0, BorderId = 0 }) { Count = 1 },
+            cellFormats);
     }
 }

@@ -1,0 +1,1 @@
+<x:sst count="7" uniqueCount="7" xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><x:si><x:t>{%$.title%}</x:t></x:si><x:si><x:t>Name</x:t></x:si><x:si><x:t>Qty</x:t></x:si><x:si><x:t>Price</x:t></x:si><x:si><x:t>{%$.items::name%}</x:t></x:si><x:si><x:t>{%$.items::qty%}</x:t></x:si><x:si><x:t>{%$.items::price%}</x:t></x:si></x:sst>

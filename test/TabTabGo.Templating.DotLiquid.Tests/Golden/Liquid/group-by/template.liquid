@@ -1,0 +1,1 @@
+{% assign g = items | GroupBy: 'k' %}{% for x in g %}{{ x.Key }}={% for y in x.Items %}{{ y.k }}{% endfor %};{% endfor %}

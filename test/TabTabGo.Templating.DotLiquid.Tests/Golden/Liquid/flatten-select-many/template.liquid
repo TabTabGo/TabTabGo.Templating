@@ -1,0 +1,1 @@
+{% assign f = orders | Flatten: 'lines' %}{% for x in f %}{{ x.q }},{% endfor %}|{% assign s = orders | SelectMany: 'id' %}{% for x in s %}{{ x }},{% endfor %}

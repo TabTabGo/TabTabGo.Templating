@@ -1,301 +1,256 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Threading;
-using DotLiquid;
-using System;
+using System.Collections.Concurrent;
 using System.Globalization;
+using DotLiquid;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json.Linq;
 using TabTabGo.Templating.Liquid.Filters;
+using TabTabGo.Templating.Liquid.Internal;
 using TabTabGo.Templating.Liquid.Tags;
-using System.Runtime.CompilerServices;
 
-namespace TabTabGo.Templating.Liquid
+namespace TabTabGo.Templating.Liquid;
+
+/// <summary>
+/// DotLiquid implementation of <see cref="TabTabGo.Templating.TemplatingEngine"/>. One instance is safe to share between threads:
+/// every render builds its own context, variables and file system (ADR 0003).
+/// </summary>
+public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
 {
-    public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
+    private static readonly object InitLock = new();
+    private static volatile bool _isInitialized;
+    private static readonly ConcurrentDictionary<(string Path, DateTime LastWriteUtc, int MaxNestingDepth), Lazy<Template>> TemplateCache = new();
+    private static long _parseCount;
+
+    private readonly TemplatingOptions _options;
+
+    /// <summary>Creates an engine with default <see cref="TemplatingOptions"/>.</summary>
+    public TemplatingEngine() : this(new TemplatingOptions())
     {
-        private static object _lock = new object();
-        private static bool _isIinitialized = false;
-        private readonly Dictionary<int, Dictionary<object, object>> _hashCache = new Dictionary<int, Dictionary<object, object>>();
-        private static readonly Dictionary<string, Template> _templateCache = new Dictionary<string, Template>();
-        public override string EngineName => "Liquid";
-        public void Initialize()
+    }
+
+    /// <summary>Creates an engine that applies <paramref name="options"/> to every render.</summary>
+    /// <param name="options">The options (cache switch, allowed settings, regex time-out, XML size cap, render limits).</param>
+    /// <exception cref="ArgumentOutOfRangeException">A numeric option is out of range.</exception>
+    public TemplatingEngine(TemplatingOptions options)
+    {
+        _options = TemplatingOptionsValidator.Validate(options, validateRenderLimits: true);
+    }
+
+    /// <summary>Creates an engine from the options registered in dependency injection.</summary>
+    /// <param name="options">The registered options.</param>
+    public TemplatingEngine(IOptions<TemplatingOptions> options)
+        : this((options ?? throw new ArgumentNullException(nameof(options))).Value)
+    {
+    }
+
+    /// <inheritdoc />
+    public override string EngineName => "Liquid";
+
+    /// <summary>Number of template files parsed since the process started (used by tests to prove single parsing).</summary>
+    internal static long ParseCount => Interlocked.Read(ref _parseCount);
+
+    /// <summary>
+    /// Registers the filters, the <c>increment</c> tag and the naming convention once per process, and lowers DotLiquid's
+    /// process-wide <c>Template.RegexTimeOut</c> (it governs DotLiquid's own template-parse expressions) to this engine's <see cref="TemplatingOptions.ParseTimeout"/>
+    /// ("the strictest engine wins"; it is never raised). <see cref="TemplatingOptions.RegexTimeout"/> bounds only the expressions a template supplies,
+    /// read per render through <see cref="RenderScope"/>, so a tight value cannot fail a valid parse.
+    /// Every entry point calls it, so calling it yourself is optional.
+    /// </summary>
+    public void Initialize()
+    {
+        lock (InitLock)
         {
-            lock (_lock)
+            if (_options.ParseTimeout < Template.RegexTimeOut)
             {
-                if (!_isIinitialized)
-                {
-                    Template.NamingConvention = new DotLiquid.NamingConventions.CSharpNamingConvention();
-                    DotLiquid.Liquid.UseRubyDateFormat = false;
+                Template.RegexTimeOut = _options.ParseTimeout;
+            }
 
-                    Template.RegisterFilter(typeof(CollectionFilters));
-                    Template.RegisterFilter(typeof(ValueFilters));
-                    Template.RegisterFilter(typeof(CustomFilters));
-                    Template.RegisterFilter(typeof(JObjectFilters));
-                    Template.RegisterFilter(typeof(OpenXmlFilters));
-                    Template.RegisterSafeType(typeof(JToken), new string[] { });
-                    Template.RegisterTag<Increment>("increment");
+            if (_isInitialized)
+            {
+                return;
+            }
 
-                    _isIinitialized = true;
-                }
+            Template.NamingConvention = new DotLiquid.NamingConventions.CSharpNamingConvention();
+            DotLiquid.Liquid.UseRubyDateFormat = false;
+
+            Template.RegisterFilter(typeof(CollectionFilters));
+            Template.RegisterFilter(typeof(ValueFilters));
+            Template.RegisterFilter(typeof(CustomFilters));
+            Template.RegisterFilter(typeof(JObjectFilters));
+            Template.RegisterFilter(typeof(OpenXmlFilters));
+            Template.RegisterFilter(typeof(GuardedStringFilters)); // after the stock filters: the guarded versions win
+            Template.RegisterTag<GuardedCapture>("capture");
+            Template.RegisterSafeType(typeof(JToken), Array.Empty<string>());
+            Template.RegisterTag<Increment>("increment");
+
+            _isInitialized = true;
+        }
+    }
+
+    /// <inheritdoc />
+    public override bool IsCached(string templatePath)
+    {
+        if (!_options.CacheTemplates || string.IsNullOrEmpty(templatePath))
+        {
+            return false;
+        }
+
+        var fullPath = Path.GetFullPath(templatePath);
+        return File.Exists(fullPath)
+            && TemplateCache.TryGetValue((fullPath, File.GetLastWriteTimeUtc(fullPath), _options.MaxNestingDepth), out var cached)
+            && cached.IsValueCreated;
+    }
+
+    /// <inheritdoc />
+    public override void ParseTemplate(string templatePath)
+    {
+        EnsureInitialized();
+        GetTemplate(templatePath);
+    }
+
+    /// <inheritdoc />
+    public override object Render(string templatePath, object? sourceData, string culture = "en-Us")
+    {
+        EnsureInitialized();
+        var (template, fullPath) = GetTemplate(templatePath);
+        var variables = new ObjectHasher(_options.MaxDepth).HashRoot(sourceData);
+
+        // The file system is resolved from the full path (a bare "main.liquid" has an empty directory name) and travels with
+        // the render: DotLiquid reads Registers["file_system"] before the process-wide static (B-1).
+        var fileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(fullPath) ?? string.Empty);
+        return RenderCore(template, variables, culture, fileSystem);
+    }
+
+    /// <inheritdoc />
+    public override string RenderString(string templateString, object? sourceData, string culture = "en-Us")
+    {
+        EnsureInitialized();
+        if (_options.MaxTemplateCharacters > 0 && templateString is { Length: > 0 } && templateString.Length > _options.MaxTemplateCharacters)
+        {
+            throw new RenderLimitExceededException($"The template string has more than {_options.MaxTemplateCharacters} characters (TemplatingOptions.MaxTemplateCharacters).");
+        }
+
+        var template = TemplateNesting.Parse(templateString, _options.MaxNestingDepth); // parsed per call, so nothing is shared between renders
+        var variables = new ObjectHasher(_options.MaxDepth).HashRoot(sourceData);
+
+        // With TemplatesPath set, includes resolve (confined) against it. Without it DotLiquid falls back to a file system the
+        // host assigned to Template.FileSystem, as before 8.0.4.
+        EnhancedLocalFileSystem? fileSystem = string.IsNullOrEmpty(_options.TemplatesPath)
+            ? null
+            : new EnhancedLocalFileSystem(Path.GetFullPath(_options.TemplatesPath));
+        return RenderCore(template, variables, culture, fileSystem);
+    }
+
+    /// <inheritdoc />
+    public override void RegisterFilter(Type type)
+    {
+        Template.RegisterFilter(type);
+    }
+
+    private string RenderCore(Template template, Hash variables, string culture, EnhancedLocalFileSystem? fileSystem)
+    {
+        var cultureInfo = CultureInfo.GetCultureInfo(culture);
+        var registers = new Hash();
+        if (fileSystem != null)
+        {
+            registers["file_system"] = fileSystem;
+        }
+
+        using var timeout = new CancellationTokenSource();
+        if (_options.RenderTimeout != Timeout.InfiniteTimeSpan)
+        {
+            timeout.CancelAfter(_options.RenderTimeout);
+        }
+
+        // The parsed template may be cached and shared by every render, so each render gets its own Context: rendering through the
+        // template's own Registers/InstanceAssigns would let {% assign %} values of one render appear in another (B-8).
+        var context = new Context(
+            new List<Hash> { variables },
+            new Hash(),
+            registers,
+            ErrorsOutputMode.Display,
+            _options.MaxIterations,
+            cultureInfo,
+            timeout.Token);
+
+        var writer = new LimitedWriter(_options.MaxOutputCharacters, cultureInfo);
+        var previousCulture = CultureInfo.CurrentCulture;
+        var previousUiCulture = CultureInfo.CurrentUICulture;
+        try
+        {
+            // Filters format with the thread culture; it is the render culture for the duration of the render (B-6).
+            CultureInfo.CurrentCulture = cultureInfo;
+            CultureInfo.CurrentUICulture = cultureInfo;
+            using (RenderScope.Begin(_options, fileSystem, timeout.Token))
+            {
+                // A regex or render time-out propagates as an exception: a failed render must not look like a successful result.
+                template.Render(writer, RenderParameters.FromContext(context, cultureInfo));
             }
         }
-
-        public override bool IsCached(string templatePath)
+        finally
         {
-            return _templateCache.ContainsKey(templatePath);
+            CultureInfo.CurrentCulture = previousCulture;
+            CultureInfo.CurrentUICulture = previousUiCulture;
         }
 
-        public override void ParseTemplate(string templatePath)
-        {
-            if (!_templateCache.ContainsKey(templatePath))
-            {
-                if (!File.Exists(templatePath))
-                {
-                    throw new Exception($"File {templatePath} doesn't exist!");
-                }
+        return writer.ToString();
+    }
 
-                lock (_lock)
-                {
-                    var template = Template.Parse(File.ReadAllText(templatePath));
-                    _templateCache[templatePath] = template;
-                }
-            }
-        }
-
-        public override object Render(string templatePath, object sourceData, string culture ="en-Us")
+    private void EnsureInitialized()
+    {
+        // Cheap on the hot path: the lock is only taken until this engine's parse time-out has been applied.
+        if (!_isInitialized || _options.ParseTimeout < Template.RegexTimeOut)
         {
             Initialize();
+        }
+    }
 
-            ParseTemplate(templatePath);
-
-            var hash = HashIt(sourceData);
-
-            
-            var parameters = new RenderParameters(new CultureInfo(culture))
-            {
-                LocalVariables = Hash.FromDictionary(hash)
-            };
-
-            Template.FileSystem = new EnhancedLocalFileSystem(Path.GetDirectoryName(templatePath));
-            var result = _templateCache[templatePath].Render(parameters);
-
-            return result;
+    private (Template Template, string FullPath) GetTemplate(string templatePath)
+    {
+        var fullPath = string.IsNullOrEmpty(templatePath) ? templatePath : Path.GetFullPath(templatePath);
+        if (string.IsNullOrEmpty(fullPath) || !File.Exists(fullPath))
+        {
+            throw new FileNotFoundException($"File {templatePath} doesn't exist!", templatePath);
         }
 
-        public override string RenderString(string templateString, object sourceData, string culture ="en-Us")
+        if (!_options.CacheTemplates)
         {
-            var template = Template.Parse(templateString);
-            var hash = HashIt(sourceData);
-            var parameters = new RenderParameters(new CultureInfo(culture))
-            {
-                LocalVariables = Hash.FromDictionary(hash)
-            };
-            return template.Render(parameters);
+            return (ParseFile(fullPath, _options.MaxNestingDepth), fullPath);
         }
 
-        public override void RegisterFilter(Type type)
+        // Keyed by full path, last write time and MaxNestingDepth: an edited file is parsed again, relative and absolute spellings of one path
+        // share an entry (B-2), and an engine with a smaller depth limit never receives a template another engine parsed under a larger one.
+        var lastWrite = File.GetLastWriteTimeUtc(fullPath);
+        var key = (fullPath, lastWrite, _options.MaxNestingDepth);
+        if (!TemplateCache.TryGetValue(key, out var entry))
         {
-            Template.RegisterFilter(type);
-        }
+            entry = TemplateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path, k.MaxNestingDepth), LazyThreadSafetyMode.ExecutionAndPublication));
 
-        private Hash HashIt(object obj)
-        {
-            if (!_hashCache.ContainsKey(Thread.CurrentThread.ManagedThreadId))
+            // drop the entries of older versions of this file, only when a new entry was needed (a cache hit does no sweep)
+            foreach (var stale in TemplateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
             {
-                _hashCache[Thread.CurrentThread.ManagedThreadId] = new Dictionary<object, object>();
-            }
-
-            var result = HashItInternal(obj);
-
-            _hashCache[Thread.CurrentThread.ManagedThreadId].Clear();
-            _hashCache[Thread.CurrentThread.ManagedThreadId] = null;
-            _hashCache.Remove(Thread.CurrentThread.ManagedThreadId);
-
-            return (Hash)result;
-        }
-
-        private object HashItInternal(object obj, Hash parentHash = null, string propertyName = null)
-        {
-            if (obj == null) return null;
-
-            if (_hashCache[Thread.CurrentThread.ManagedThreadId].ContainsKey(obj))
-            {
-                return _hashCache[Thread.CurrentThread.ManagedThreadId][obj];
-            }
-
-            if (obj.GetType() == typeof(JObject))
-            {
-                if (!string.IsNullOrEmpty(propertyName) && parentHash != null)
-                {
-                    parentHash[propertyName + "Json"] = obj;
-                }
-
-                return HashJObject(obj as JObject);
-            }
-            else if (obj.GetType() == typeof(JArray))
-            {
-                if (!string.IsNullOrEmpty(propertyName) && parentHash != null)
-                {
-                    parentHash[propertyName + "Json"] = obj;
-                }
-
-                return HashJArray(obj as JArray);
-            }
-            else if (IsEnumerableType(obj.GetType()) || IsCollectionType(obj.GetType()))
-            {
-                int i = 0;
-                var collection = new List<object>();
-
-                _hashCache[Thread.CurrentThread.ManagedThreadId][obj] = collection;
-
-                foreach (var item in (IEnumerable)obj)
-                {
-                    var isHashable = IsHashable(item.GetType());
-                    var hashedValue = isHashable ? item : HashItInternal(item);
-
-                    collection.Add(hashedValue);
-                    i++;
-                }
-
-                return collection;
-            }
-            else
-            {
-                var result = new Hash();
-
-                _hashCache[Thread.CurrentThread.ManagedThreadId][obj] = result;
-
-                foreach (PropertyInfo property in obj.GetType().GetProperties())
-                {
-                    var val = property.GetValue(obj, null);
-                    var memberName = Template.NamingConvention.GetMemberName(property.Name);
-                    var isHashable = IsHashable(property.PropertyType);
-                    var hashedValue = isHashable ? val : HashItInternal(val, result, memberName);
-                    result[memberName] = hashedValue;
-                }
-
-                return result;
+                TemplateCache.TryRemove(stale, out _);
             }
         }
 
-        private Hash HashJObject(JObject obj)
+        try
         {
-            var result = new Hash();
-
-            _hashCache[Thread.CurrentThread.ManagedThreadId][obj] = result;
-
-            if (obj.Type == JTokenType.Object)
-            {
-                foreach (var child in obj.Children())
-                {
-                    if (child.Type == JTokenType.Property)
-                    {
-                        var property = (JProperty)child;
-                        string name = property.Name;
-                        object value = null;
-
-                        if (property.Value != null)
-                        {
-                            var tokenValue = ((JToken)property.Value);
-                            var tokenType = tokenValue.Type;
-                            if (tokenType == JTokenType.Object)
-                            {
-                                value = HashJObject((JObject)property.Value);
-                            }
-                            else if (tokenType == JTokenType.Array)
-                            {
-                                value = HashJArray((JArray)property.Value);
-                            }
-                            else
-                            {
-                                value = ((JValue)property.Value).Value;
-                            }
-                        }
-
-                        result[name] = value;
-                    }
-                }
-            }
-
-            return result;
+            return (entry.Value, fullPath);
         }
-
-        private ICollection<object> HashJArray(JArray obj)
+        catch
         {
-            var collection = new List<object>();
-
-            _hashCache[Thread.CurrentThread.ManagedThreadId][obj] = collection;
-
-            foreach (var item in obj)
-            {
-                if (item.Type == JTokenType.Object)
-                {
-                    collection.Add(HashJObject(item as JObject));
-                }
-                else if (item.Type == JTokenType.Array)
-                {
-                    collection.Add(HashJArray(item as JArray));
-                }
-                else
-                {
-                    var value = item as JValue;
-                    collection.Add(value.Value);
-                }
-            }
-
-            return collection;
+            TemplateCache.TryRemove(key, out _); // do not cache a failed parse
+            throw;
         }
+    }
 
-        private bool IsHashable(Type type)
-        {
-            if (type == typeof(object))
-            {
-                return false;
-            }
-            var typeInfo = type.GetTypeInfo();
-            
-            if (typeInfo.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>))
-            {
-                return IsHashable(Nullable.GetUnderlyingType(type));
-            }
-
-            return (typeInfo.IsPrimitive
-                || type == typeof(string)
-                || !type.GetProperties().Any())
-                || type == typeof(DateTime)
-                || type == typeof(DateTimeOffset)
-                || type == typeof(JToken)
-                || type == typeof(JObject)
-                || type == typeof(Decimal);
-
-        }
-
-        private bool IsEnumerableType(Type type)
-        {
-            var typeInfo = type.GetTypeInfo();
-            return typeInfo.GetInterface("IEnumerable", true) != null;
-        }
-
-        private bool IsCollectionType(Type type)
-        {
-            var typeInfo = type.GetTypeInfo();
-            return typeInfo.GetInterface("ICollection", true) != null;
-        }
-
-        private bool IsAnonymousType(Type type)
-        {
-            if (type == null)
-                throw new ArgumentNullException("type");
-
-            var typeInfo = type.GetTypeInfo();
-            // HACK: The only way to detect anonymous types right now.
-            return typeInfo.IsDefined(typeof(CompilerGeneratedAttribute), false)
-                && typeInfo.IsGenericType && type.Name.Contains("AnonymousType")
-                && (type.Name.StartsWith("<>") || type.Name.StartsWith("VB$"))
-                && (typeInfo.Attributes & TypeAttributes.NotPublic) == TypeAttributes.NotPublic;
-        }
+    private static Template ParseFile(string fullPath, int maxNestingDepth)
+    {
+        Interlocked.Increment(ref _parseCount);
+        var text = File.ReadAllText(fullPath);
+        var template = TemplateNesting.Parse(text, maxNestingDepth);
+        // Defence in depth, no test can observe it: render isolation comes from the per-render Context (tested in RenderIsolationTests). Without this
+        // call the cached template would keep a reference to the last render's registers and assigns.
+        template.MakeThreadSafe();
+        return template;
     }
 }

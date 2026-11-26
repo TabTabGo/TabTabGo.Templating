@@ -5,8 +5,24 @@ using Xunit;
 
 namespace TabTabGo.Templating.OpenXml.Tests.SpreadSheet
 {
-    public class ParseExcelTemplateTest
+    public class ParseExcelTemplateTest : IDisposable
     {
+        private readonly string _outputDirectory =
+            Path.Combine(Path.GetTempPath(), "ttg-templating-tests", Guid.NewGuid().ToString("N"));
+
+        public ParseExcelTemplateTest()
+        {
+            Directory.CreateDirectory(_outputDirectory);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(_outputDirectory))
+            {
+                Directory.Delete(_outputDirectory, recursive: true);
+            }
+        }
+
         [Fact]
         public void ParseExcel()
         {
@@ -15,7 +31,7 @@ namespace TabTabGo.Templating.OpenXml.Tests.SpreadSheet
             var engine = new Templating.OpenXml.SpreadSheet.TemplatingEngine();
             var content = engine.Render(templatePath, jobject) as MemoryStream;
             Assert.NotNull(content);
-            content.WriteTo(new FileStream("./SpreadSheet/Output/test01.xlsx", FileMode.CreateNew | FileMode.Truncate));
+            AssertWritesNonEmptyFile(content, "test01.xlsx");
         }
 
         [Fact]
@@ -26,22 +42,33 @@ namespace TabTabGo.Templating.OpenXml.Tests.SpreadSheet
             var engine = new Templating.OpenXml.SpreadSheet.TemplatingEngine();
             var content = engine.Render(templatePath, new { reportResult = jobject }) as MemoryStream;
             Assert.NotNull(content);
-            content.WriteTo(new FileStream("SpreadSheet/Output/report_output.xlsx", FileMode.CreateNew | FileMode.Truncate));
+            AssertWritesNonEmptyFile(content, "report_output.xlsx");
         }
 
         [Theory]
-        [InlineData("SpreadSheet/json/report.json", "SpreadSheet/Template/detailed-report.xlsx", "SpreadSheet/Output/report_output.xlsx")]
-        [InlineData("SpreadSheet/json/report.illegal.json", "SpreadSheet/Template/detailed-report.xlsx", "SpreadSheet/Output/report_illegal_output.xlsx")]
-        public void GenerateExcelReport(string inputFile, string templatePath, string expectedOutputPath)
+        [InlineData("SpreadSheet/json/report.json", "SpreadSheet/Template/detailed-report.xlsx", "report_output.xlsx")]
+        [InlineData("SpreadSheet/json/report.illegal.json", "SpreadSheet/Template/detailed-report.xlsx", "report_illegal_output.xlsx")]
+        public void GenerateExcelReport(string inputFile, string templatePath, string outputFileName)
         {
             var jobject = JObject.Parse(File.ReadAllText(inputFile));
-            
+
             var engine = new OpenXml.SpreadSheet.TemplatingEngine();
             var content = engine.Render(templatePath, new { reportResult = jobject }) as MemoryStream;
 
             Assert.NotNull(content);
 
-            content.WriteTo(new FileStream(expectedOutputPath, FileMode.CreateNew | FileMode.Truncate));
+            AssertWritesNonEmptyFile(content, outputFileName);
+        }
+
+        private void AssertWritesNonEmptyFile(MemoryStream content, string fileName)
+        {
+            var path = Path.Combine(_outputDirectory, fileName);
+            using (var file = new FileStream(path, FileMode.Create))
+            {
+                content.WriteTo(file);
+            }
+
+            Assert.True(new FileInfo(path).Length > 0);
         }
     }
 }

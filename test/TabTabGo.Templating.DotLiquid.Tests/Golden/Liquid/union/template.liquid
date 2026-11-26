@@ -1,0 +1,1 @@
+{% assign u = a | Union: b %}{% for x in u %}{{ x }},{% endfor %}|{% assign e = a | Union: none %}{% for x in e %}{{ x }},{% endfor %}
