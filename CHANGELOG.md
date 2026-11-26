@@ -8,8 +8,10 @@ Backport of the S-13 parse guard from v10/v11 (additive).
 
 ### Added
 - `TemplatingOptions.MaxNestingDepth` (default 100, validated: at least 1). `RenderString` and template files count block nesting over DotLiquid's own tokens before `Template.Parse`; a deeper template throws `DotLiquid.Exceptions.SyntaxException` naming `MaxNestingDepth` instead of overflowing the stack (an uncatchable process crash below 60 KB of template text). The parse runs on a thread whose stack is sized from the limit. The template-file cache key includes the limit.
-- Partials read by `include`/`extends` through the render's file system (`TemplatesPath`, or the directory of the rendered file) are scanned against `MaxNestingDepth` before DotLiquid parses them; a deeper partial fails the include with a `SyntaxException` naming the option (DotLiquid may render it inline as its error text). A file system the host assigns to `Template.FileSystem` is not wrapped.
-- OpenXml JSON workbook: a workbook of the wrong JSON shape (`Workbook.Sheets`, `Columns`, `Rows` or `Cells` not an array, an entry that is not an object, a non-text sheet `Name`) is an `ArgumentException` instead of Json.NET's `InvalidOperationException`/`InvalidCastException`; messages name the path, never a value; nothing is written. A JSON `null` `Cells` is "not given".
+- Partials read by `include`/`extends` through the render's file system (`TemplatesPath`, or the directory of the rendered file) are scanned against `MaxNestingDepth` before DotLiquid parses them; a deeper partial fails the include with a `SyntaxException` naming the option (DotLiquid may render it inline as its error text). A host-assigned `EnhancedLocalFileSystem` is checked too (with the render's options inside an engine render, the default 100 outside one); other `IFileSystem` types, such as DotLiquid's own `LocalFileSystem`, are not covered.
+- Behaviour change for hosts that use the public `EnhancedLocalFileSystem` directly: `ReadTemplateFile` throws a `SyntaxException` for a partial nested deeper than `MaxNestingDepth` (the render's option inside an engine render, the default 100 outside one).
+- `{% literal %}` bodies are skipped by the nesting scan like `raw` and `comment`; without this the scan counted the blocks inside a literal and refused templates stock DotLiquid parses (a regression against 8.0.4).
+- OpenXml JSON workbook: a workbook of the wrong JSON shape (`Workbook.Sheets`, `Columns`, `Rows` or `Cells` not an array, an entry that is not an object, an object or array sheet `Name`) is an `ArgumentException` instead of Json.NET's `InvalidOperationException`/`InvalidCastException`; messages name the path, never a value; nothing is written. A JSON `null` `Cells` is "not given".
 - CI scripts: `vuln_gate.py` reads the report past a warning line that contains `{` and exits 2 when no report is readable (same as v10/v11).
 - The rest of the v8 limits statement is unchanged: no iteration cap, render time-out, output cap or template size cap on this line (use v10 or v11).
 
@@ -18,7 +20,7 @@ Backport of the S-13 parse guard from v10/v11 (additive).
 Security backport for the .NET 8 line: `AppSetting` opt-in, confined includes, dynamic-LINQ restrictions (`FilterBy`/`FilterByPrefix`), regex and XML bounds, per-render file system and context, safe template cache, OpenXml
 JSON-workbook mode and booleans, no temp files.
 
-**The v8 line has no render limits.** No iteration cap, no render time-out, no output cap, no nesting cap and no template size cap exist on v8 (they exist on v10 and v11 and are not backported). Do not render untrusted templates with v8.
+**The v8 line has no render limits (as of 8.0.4; 8.0.5 adds `MaxNestingDepth`, see 8.0.5 above).** No iteration cap, no render time-out, no output cap, no nesting cap and no template size cap exist in 8.0.4 (they exist on v10 and v11; only the nesting cap was backported, in 8.0.5). Do not render untrusted templates with v8.
 
 ### Fixed (fix round)
 - OpenXml JSON workbook: missing `$.StyleMap`, `InlineString`/`SharedString`/`Error` cells, invalid XML characters, sheet list and sheet name validation, duplicate sheet ids, default date style, style lookup by direct key comparison, stylesheet links outside `StylesheetRoot`.

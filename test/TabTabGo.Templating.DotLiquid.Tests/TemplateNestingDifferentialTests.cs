@@ -15,7 +15,7 @@ public sealed class TemplateNestingDifferentialTests
     private static readonly string[] Pieces =
     {
         "{% if a %}", "{%- if a -%}", "{% endif %}", "{%- endif -%}", "{% for i in x %}", "{% endfor %}", "{% unless a %}", "{% endunless %}",
-        "{{ x }}", "{{ a }", "{{{", "}}", "{# #}", "{% raw %}", "{% endraw %}", "{% comment %}", "{% endcomment %}", "{%", "%}", "{%-", "-%}",
+        "{{ x }}", "{{ a }", "{{{", "}}", "{# #}", "{% raw %}", "{% endraw %}", "{% literal %}", "{% endliteral %}", "{% comment %}", "{% endcomment %}", "{%", "%}", "{%-", "-%}",
         "text ", "{# ", "{% else %}", "{% capture c %}", "{% endcapture %}", "{{ '{% if a %}' }}", "{% assign y = 1 %}", "\n", "{ % if a % }",
     };
 
@@ -89,6 +89,18 @@ public sealed class TemplateNestingDifferentialTests
         }
 
         return (rejected, over, under);
+    }
+
+    [Fact]
+    public void LiteralBlocks_AreSkippedLikeRawAndComment_AndNeverRefuseATemplateStockParseAccepts()
+    {
+        var template = string.Concat(Enumerable.Repeat("{% literal %}{% if a %}{% endliteral %}", 60));
+
+        Assert.NotNull(global::DotLiquid.Template.Parse(template)); // the stock parser accepts it
+        Assert.Equal(1, TemplateNesting.Depth(template));
+        Assert.NotNull(TemplateNesting.Parse(template, 100, sharedTokens: true));
+        Assert.NotNull(TemplateNesting.Parse(template, 100, sharedTokens: false));
+        Assert.Equal(string.Empty, new Liquid.TemplatingEngine().RenderString(template, new { a = true }).Replace("{% if a %}", string.Empty));
     }
 
     [Fact]
