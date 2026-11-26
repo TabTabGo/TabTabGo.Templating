@@ -270,10 +270,50 @@ class PinFormTests(unittest.TestCase):
         with self.assertRaises(release_guards.GuardError):
             release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(A)" />', properties), False)
 
+    def test_dropped_candidates_leave_a_marker_so_a_pre_release_value_cannot_hide(self):
+        # 300 declared values plus the rc one: the cap drops candidates, which must block (stable and pre-release tags alike)
+        properties = "".join(f"<P>10.0.{i}</P>" for i in range(300)) + "<P>11.0.0-rc.1</P>"
+        repo = self._repo('<PackageVersion Include="A" Version="$(P)" />', properties)
+        for prerelease in (False, True):
+            with self.assertRaises(release_guards.GuardError) as raised:
+                release_guards.check_pins_match_release_kind(repo, prerelease)
+            self.assertIn("too many", str(raised.exception))
+        self.assertIn(release_guards.TRUNCATED, release_guards.expand_properties("$(P)", {"P": [str(i) for i in range(300)]}))
+
+    def test_floating_versions_are_prerelease_and_build_metadata_is_not(self):
+        for version in ("2.3.260-*", "10.*-*", "10.0.1-*"):
+            with self.subTest(version=version):
+                self.assertTrue(release_guards.has_prerelease_label(version))
+                with self.assertRaises(release_guards.GuardError):
+                    release_guards.check_pins_match_release_kind(self._repo(f'<PackageVersion Include="A" Version="{version}" />'), False)
+        for version in ("1.0.0+2026-abc", "10.0.1", "[10.0.1, 11.0.0)", "10.*"):
+            with self.subTest(version=version):
+                self.assertFalse(release_guards.has_prerelease_label(version))
+        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="1.0.0+2026-abc" />'), False)
+
+    def test_every_reference_is_expanded_per_pass_so_many_references_resolve(self):
+        text = ".".join(f"$(P{i})" for i in range(12))
+        properties = {f"P{i}": ["1"] for i in range(12)}
+        self.assertEqual([".".join(["1"] * 12)], release_guards.expand_properties(text, properties))
+        names = "".join(f"<P{i}>1</P{i}>" for i in range(12))
+        release_guards.check_pins_match_release_kind(self._repo(f'<PackageVersion Include="A" Version="{text}" />', names), False)
+
+    def test_a_self_appending_property_reports_that_it_does_not_resolve(self):
+        repo = self._repo('<PackageVersion Include="A" Version="$(S)" />', "<S>$(S)-ci</S>")
+        with self.assertRaises(release_guards.GuardError) as raised:
+            release_guards.check_pins_match_release_kind(repo, False)
+        self.assertIn("does not resolve within", str(raised.exception))
+        self.assertNotIn("undeclared", str(raised.exception))
+
+    def test_an_undeclared_property_has_its_own_message(self):
+        with self.assertRaises(release_guards.GuardError) as raised:
+            release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="B" Version="$(Unknown)" />'), False)
+        self.assertIn("undeclared", str(raised.exception))
+
     def test_expand_properties_covers_every_declared_value_and_caps_the_candidates(self):
         self.assertEqual({"1", "2"}, set(release_guards.expand_properties("$(P)", {"P": ["1", "2"]})))
         many = {"P": [str(i) for i in range(50)]}
-        self.assertLessEqual(len(release_guards.expand_properties("$(P)-$(P)-$(P)", many)), release_guards.MAX_CANDIDATES)
+        self.assertLessEqual(len(release_guards.expand_properties("$(P)-$(P)-$(P)", many)), release_guards.MAX_CANDIDATES + 1)
 
     def test_prerelease_tag_accepts_prerelease_pins_in_every_form(self):
         release_guards.check_pins_match_release_kind(self._repo("<PackageVersion Include='A' Version='11.0.0-rc.3' />"), True)

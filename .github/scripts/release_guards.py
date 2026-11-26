@@ -138,9 +138,16 @@ def check_declared_version(root: Path, core: str) -> None:
 
 
 _PROPERTY_REFERENCE = re.compile(r"\$\(([A-Za-z_][A-Za-z0-9_.\-]*)\)")
-_SEMVER_LABEL = re.compile(r"[0-9]-[0-9A-Za-z]")  # any SemVer pre-release label (-rc, -preview, -local, -anything), whatever its case
+_SEMVER_LABEL = re.compile(r"[0-9*]-[0-9A-Za-z*]")  # any SemVer pre-release label (-rc, -preview, -local, -anything) or floating one (2.3.260-*, 10.*-*), whatever its case
 MAX_RESOLVED_LENGTH = 4096
 MAX_CANDIDATES = 256
+MAX_PASSES = 8
+TRUNCATED = "$(TTG-TRUNCATED)"  # appended when candidates were dropped: the check must not pass on a list it only partly read
+
+
+def has_prerelease_label(version: str) -> bool:
+    """True when `version` carries a pre-release label: the part before any `+build` metadata (which may hold hyphens) is searched, so 1.0.0+2026-abc is stable."""
+    return _SEMVER_LABEL.search(version.partition("+")[0]) is not None
 PropertyValues = dict[str, list[str]]
 
 
@@ -168,26 +175,45 @@ def collect_properties(paths: list[Path]) -> PropertyValues:
     return properties
 
 
-def expand_properties(value: str, properties: PropertyValues, depth: int = 8) -> list[str]:
-    """Every string `value` can resolve to when each $(Name) takes each of its declared values (repeatedly, so a property may name another).
+def expand_properties(value: str, properties: PropertyValues, depth: int = MAX_PASSES) -> list[str]:
+    """Every string `value` can resolve to when each $(Name) takes each of its declared values (every reference per pass, up to `depth` passes, so a property may name another).
 
-    An undeclared name, a cycle, or a result past MAX_RESOLVED_LENGTH / MAX_CANDIDATES leaves a $( in the string, which a stable tag treats as a problem."""
+    A cycle, a self-appending value or an undeclared name leaves a $( in the string. When candidates had to be dropped (past MAX_CANDIDATES or MAX_RESOLVED_LENGTH) the
+    TRUNCATED marker is appended, so a check never passes on a list it read only in part."""
     results = [value]
+    truncated = False
     for _ in range(depth):
         following: list[str] = []
         changed = False
         for candidate in results:
-            reference = next((m for m in _PROPERTY_REFERENCE.finditer(candidate) if m.group(1) in properties), None)
-            if reference is None:
+            references = [m for m in _PROPERTY_REFERENCE.finditer(candidate) if m.group(1) in properties]
+            if not references:
                 following.append(candidate)
                 continue
             changed = True
-            for declared in properties[reference.group(1)]:
-                expanded = candidate[: reference.start()] + declared + candidate[reference.end():]
-                following.append(expanded if len(expanded) <= MAX_RESOLVED_LENGTH else candidate)
-        results = list(dict.fromkeys(following))[:MAX_CANDIDATES]
+            partial = [""]
+            position = 0
+            for reference in references:
+                text = candidate[position: reference.start()]
+                partial = [head + text + declared for head in partial for declared in properties[reference.group(1)]]
+                if len(partial) > MAX_CANDIDATES:
+                    partial = partial[:MAX_CANDIDATES]
+                    truncated = True
+                position = reference.end()
+            for head in partial:
+                expanded = head + candidate[position:]
+                if len(expanded) > MAX_RESOLVED_LENGTH:
+                    truncated = True
+                else:
+                    following.append(expanded)
+        results = list(dict.fromkeys(following))
+        if len(results) > MAX_CANDIDATES:
+            results = results[:MAX_CANDIDATES]
+            truncated = True
         if not changed:
             break
+    if truncated:
+        results.append(TRUNCATED)
     return results
 
 
@@ -230,10 +256,20 @@ def check_pins_match_release_kind(root: Path, prerelease: bool) -> None:
             if references_local_build(path, properties):
                 problems.append(f"{path.name} references a -local build")
             versions = resolved_versions(path, properties)
-            if not prerelease and any(_SEMVER_LABEL.search(version) for version in versions):
+            if any(TRUNCATED in version for version in versions):
+                problems.append(f"{path.name} has too many or too long property values to check (more than {MAX_CANDIDATES} candidates or {MAX_RESOLVED_LENGTH} characters)")
+            if not prerelease and any(has_prerelease_label(version) for version in versions):
                 problems.append(f"{path.name} pins a pre-release package")
-            if not prerelease and any("$(" in version for version in versions):
-                problems.append(f"{path.name} has a version that does not resolve to a declared value (an unknown, cyclic or oversized property)")
+            if not prerelease:
+                for version in versions:
+                    if "$(" not in version or TRUNCATED in version:
+                        continue
+                    names = {m.group(1) for m in _PROPERTY_REFERENCE.finditer(version)}
+                    if names & set(properties):
+                        problems.append(f"{path.name} has a version that does not resolve within {MAX_PASSES} passes (a cyclic or self-appending property)")
+                    else:
+                        problems.append(f"{path.name} references an undeclared property in a version")
+                    break
         except ET.ParseError:
             problems.append(f"{path.name} is not well-formed XML")
     if problems:
