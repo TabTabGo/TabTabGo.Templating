@@ -17,7 +17,7 @@ and can be referenced together.
 |---|---|---|---|
 | v8 | `releases/v8.0.x/v8.0.N` | net8.0 | bridge for .NET 8 consumers (8.0.3 package refresh, 8.0.4 security backport: AppSetting opt-in, confined includes, regex time-out, DTD-free XML, per-render file system, safe template cache, OpenXml fixes; 8.0.5 adds the `MaxNestingDepth` parse guard). .NET 8 support ends 2026-11-10 |
 | v10 | `releases/v10.0.x/v10.0.0` | net10.0 | planned LTS line |
-| v11 | `releases/v11.0.x/v11.0.0` | net11.0 | planned, pre-release until .NET 11 GA |
+| v11 | `releases/v11.0.x/v11.0.0` | net11.0 | planned, stable `11.0.0` once .NET 11 is GA |
 
 Design and decisions: `tabtabgo/docs/templating-modernization/` in the ttg-workspace (spec and ADRs 0001-0005).
 
@@ -42,7 +42,7 @@ Packages are published **only from tags**. There is no publish from `master` or 
 
 1. Set `<Version>` in `Directory.Build.props` on the release branch `releases/vM.m.x/vM.m.p`.
 2. Merge the feature branch into the release branch through a pull request (`ci` must pass).
-3. Push the tag `vM.m.p` (or `vM.m.p-rc.N`) on the release branch commit.
+3. Push the tag `vM.m.p` on the release branch commit.
 4. `publish.yml` checks the tag against the commit (tag major equals target framework major, tag is on its release
    branch, version equals the tag, version not yet on nuget.org), builds, tests, scans, packs, and publishes through
    nuget.org trusted publishing. Stable tags wait for approval of the `nuget-stable` environment.
@@ -54,7 +54,7 @@ branch and tag the new version.
 Pack locally without publishing:
 
 ```bash
-dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.3 -o out
+dotnet pack TabTabGo.Templating.sln -c Release -p:Version=8.0.5 -o out
 ```
 
 ## Release notes 8.0.5

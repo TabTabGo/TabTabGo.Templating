@@ -34,13 +34,13 @@ class GuardError(Exception):
 
 
 def parse_tag(tag: str) -> dict[str, str | bool]:
-    """Step 2: version from the tag; must be a stable or rc/ci/alpha/beta pre-release version."""
+    """Step 2: version from the tag. Releases are stable (vMAJOR.MINOR.PATCH) and the project publishes no -rc tags; a pre-release suffix is still parsed so that a mistaken pre-release tag is judged by the pre-release rules, never waved through."""
     if not tag.startswith("v"):
         raise GuardError(f"tag '{tag}' does not start with 'v'")
     version = tag[1:]
     match = TAG_VERSION.fullmatch(version)
     if not match:
-        raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-(rc|ci|alpha|beta).N")
+        raise GuardError(f"tag '{tag}' is not vMAJOR.MINOR.PATCH (releases are stable versions)")
     return {
         "version": version,
         "core": match.group("core"),
