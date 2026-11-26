@@ -25,7 +25,7 @@ internal static class TemplateNesting
     private static readonly HashSet<string> Continuations = new(StringComparer.Ordinal) { "else", "elsif", "elseif", "when", "break", "continue" };
 
     // DotLiquid's built-in block tags; they open a block level even when the tag registry is cold
-    private static readonly HashSet<string> BuiltInBlocks = new(StringComparer.Ordinal) { "if", "unless", "case", "for", "tablerow", "capture", "raw", "comment", "ifchanged" };
+    private static readonly HashSet<string> BuiltInBlocks = new(StringComparer.Ordinal) { "if", "unless", "case", "for", "tablerow", "capture", "raw", "comment", "literal", "ifchanged" };
 
     // registered names are stable for the life of the process (a name may be registered later, never removed), so only positive answers are kept
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> KnownBlocks = new(StringComparer.Ordinal);
@@ -169,8 +169,9 @@ internal static class TemplateNesting
 
     /// <summary>
     /// The deepest block nesting the scan counts, stopping once it passes <paramref name="stopAfter"/>. An end tag lowers the depth only when it closes the innermost
-    /// open block; any other end tag changes nothing (DotLiquid rejects it as an unknown tag, but never nests deeper because of it). The bodies of <c>raw</c> and
-    /// <c>comment</c> are skipped, as DotLiquid's tokenizer returns each as one text token.
+    /// open block; any other end tag changes nothing (DotLiquid rejects it as an unknown tag, but never nests deeper because of it). The bodies of <c>raw</c>, <c>comment</c> and
+    /// <c>literal</c> are skipped: DotLiquid's tokenizer returns a raw or comment body as one text token, and its <c>literal</c> block consumes the tags up to <c>endliteral</c> without
+    /// parsing them as blocks, so none of them nests anything.
     /// </summary>
     /// <param name="template">The template text.</param>
     /// <param name="stopAfter">Depth at which to stop counting.</param>
@@ -190,7 +191,7 @@ internal static class TemplateNesting
         var open = new Stack<string>();
         var notBlocks = new HashSet<string>(StringComparer.Ordinal); // per scan: an unregistered name is looked up once
         var deepest = 0;
-        string? skipUntil = null; // raw and comment bodies: DotLiquid's tokenizer returns the body as one text token up to the end tag
+        string? skipUntil = null; // raw, comment and literal bodies: not parsed as blocks, so nothing inside them nests
         foreach (var token in tokens)
         {
             if (!token.StartsWith("{%", StringComparison.Ordinal))
@@ -219,7 +220,7 @@ internal static class TemplateNesting
                 continue;
             }
 
-            if (name is "raw" or "comment")
+            if (name is "raw" or "comment" or "literal")
             {
                 skipUntil = "end" + name;
                 if (IsBlock(name, notBlocks, tagLookup))

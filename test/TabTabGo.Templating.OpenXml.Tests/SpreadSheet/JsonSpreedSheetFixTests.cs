@@ -263,6 +263,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return; // the platform or account cannot create symbolic links
         }
 
@@ -318,6 +319,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             || !TryLink(Path.Combine(root, "l2"), Path.Combine("..", "secret.xml"), directory: false)
             || !TryLink(Path.Combine(root, "l1"), Path.Combine("a", "b", "c", "sub", "l2"), directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -335,6 +337,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
             || !TryLink(Path.Combine(_base, "outside", "ct", "l2"), Path.Combine("..", "secret.xml"), directory: false)
             || !TryLink(Path.Combine(root, "l1"), Path.Combine("sub", "l2"), directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -350,6 +353,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         if (!TryLink(Path.Combine(root, "d", "link.xml"), Path.Combine("..", "real.xml"), directory: false)
             || !TryLink(Path.Combine(root, "dirlink"), Path.Combine(root, "d"), directory: true))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -781,6 +785,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
             Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
+            return;
         }
 
         var file = Path.Combine(_base, "root", "noperm.xml");
@@ -830,6 +835,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         var root = Path.Combine(_base, "root");
         if (!TryLink(Path.Combine(root, "a.xml"), "b.xml", directory: false) || !TryLink(Path.Combine(root, "b.xml"), "a.xml", directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -1059,6 +1065,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         File.WriteAllText(regular, string.Empty);
         if (!TryMakeFifo(fifo))
         {
+            Assert.Skip("named pipes (mkfifo) are not available here");
             return;
         }
 
@@ -1304,6 +1311,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         var root = Path.Combine(_base, "root");
         if (!TryLink(Path.Combine(root, "loop1.xml"), "loop2.xml", directory: false) || !TryLink(Path.Combine(root, "loop2.xml"), "loop1.xml", directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -1312,6 +1320,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         {
             if (!TryLink(Path.Combine(root, "hop" + i + ".xml"), i == 39 ? "end.xml" : "hop" + (i + 1) + ".xml", directory: false))
             {
+                Assert.Skip("symbolic links cannot be created here (platform or account)");
                 return;
             }
         }
@@ -1331,6 +1340,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
             Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
+            return;
         }
 
         var locked = Path.Combine(_base, "root", "locked");
@@ -1338,6 +1348,7 @@ public sealed class JsonSpreedSheetFixTests : IDisposable
         File.WriteAllText(Path.Combine(locked, "inner.xml"), StyleXml);
         if (!TryLink(Path.Combine(_base, "root", "viadir.xml"), Path.Combine("locked", "inner.xml"), directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 

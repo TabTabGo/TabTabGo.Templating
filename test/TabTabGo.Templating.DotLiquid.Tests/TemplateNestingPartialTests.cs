@@ -25,17 +25,27 @@ public sealed class TemplateNestingPartialTests
     }
 
     [Fact]
-    public void Render_IncludedPartialNestedDeeperThanTheLimit_DoesNotParseIt()
+    public void Render_IncludedPartialNestedDeeperThanTheLimit_IsRefusedWithTheSyntaxErrorAndNeverParsed()
     {
         using var dir = new TempDir();
-        dir.Write("_deep.liquid", Nested(5000));
+        dir.Write("_deep.liquid", string.Concat(Enumerable.Repeat("{% if a %}", 5000)) + "PARTIAL-BODY" + string.Concat(Enumerable.Repeat("{% endif %}", 5000)));
         var main = dir.Write("main.liquid", "{% include 'deep' %}");
         var engine = new Liquid.TemplatingEngine(new TemplatingOptions { TemplatesPath = dir.Path });
 
-        string? output = null;
-        var thrown = Record.Exception(() => output = (string)engine.Render(main, new { a = true }));
+        var output = (string)engine.Render(main, new { a = true });
 
-        // never a stack overflow (that would end the test process); the include either throws or renders DotLiquid's inline error, and never the partial's body
-        Assert.True(thrown is SyntaxException || (output ?? "").Contains("MaxNestingDepth", StringComparison.Ordinal), $"thrown={thrown?.GetType().Name} output={output}");
+        // DotLiquid renders an exception of an include as inline error text (Display mode); the process never overflows its stack and the partial body is absent
+        Assert.Contains("Liquid syntax error: The template nests blocks deeper than 100 levels (TemplatingOptions.MaxNestingDepth)", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("PARTIAL-BODY", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Render_IncludedPartialWithinTheLimit_StillRenders()
+    {
+        using var dir = new TempDir();
+        dir.Write("_ok.liquid", Nested(40).Replace("x", "PARTIAL-BODY"));
+        var main = dir.Write("main.liquid", "{% include 'ok' %}");
+
+        Assert.Equal("PARTIAL-BODY", (string)new Liquid.TemplatingEngine().Render(main, new { a = true }));
     }
 }

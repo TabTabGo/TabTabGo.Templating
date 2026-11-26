@@ -44,6 +44,8 @@ Characters that are not valid XML 1.0 are removed; emoji and other supplementary
 ## JSON workbook mode
 
 `Render("", data)` with `data.Workbook` describing sheets, columns and styles generates a workbook from scratch (`JsonSpreedSheet`). Every entry of `Workbook.Sheets` becomes a sheet that
+
+`Workbook.Worksheet.SheetData.Rows` is required and must be an array (use an empty array for no rows); a missing or non-array `Rows`, or a missing `SheetData`, is an `ArgumentException` (it used to produce an empty workbook). `Workbook.Sheets` must be an array of objects, `Columns` an array of objects, and `Rows` an array of objects whose `Cells` is an array of objects; a JSON `null` `Columns` or `Cells` means "not given", and a sheet `Name` that is an object or array is refused. A workbook of the wrong shape is an `ArgumentException` (not Json.NET's `InvalidOperationException`) whose message names the path and never a value, and nothing is written.
 uses the single `Workbook.Worksheet` definition. Cell `DataType` is one of `String`, `Number`, `Boolean`, `Date`, `Error`, `SharedString`, `InlineString` (unknown names become `String`);
 dates are serial numbers with a date style. Without `Workbook.Stylesheets` a minimal valid stylesheet is generated (style index 5 is a date); a date cell with no style gets index 5 only
 then, or when a loaded stylesheet has more than five cell formats. A missing `$.StyleMap` is an empty map (every cell uses style 0). `InlineString` is written as an inline string; `SharedString`

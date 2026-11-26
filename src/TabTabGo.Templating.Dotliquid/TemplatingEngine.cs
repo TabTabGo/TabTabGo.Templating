@@ -214,7 +214,7 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
 
         if (!_options.CacheTemplates)
         {
-            return (ParseFile(fullPath), fullPath);
+            return (ParseFile(fullPath, _options.MaxNestingDepth), fullPath);
         }
 
         // Keyed by full path, last write time and MaxNestingDepth: an edited file is parsed again, relative and absolute spellings of one path
@@ -223,7 +223,7 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
         var key = (fullPath, lastWrite, _options.MaxNestingDepth);
         if (!TemplateCache.TryGetValue(key, out var entry))
         {
-            entry = TemplateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path), LazyThreadSafetyMode.ExecutionAndPublication));
+            entry = TemplateCache.GetOrAdd(key, k => new Lazy<Template>(() => ParseFile(k.Path, k.MaxNestingDepth), LazyThreadSafetyMode.ExecutionAndPublication));
 
             // drop the entries of older versions of this file, only when a new entry was needed (a cache hit does no sweep)
             foreach (var stale in TemplateCache.Keys.Where(k => k.Path == fullPath && k.LastWriteUtc != lastWrite).ToList())
@@ -243,11 +243,11 @@ public class TemplatingEngine : TabTabGo.Templating.TemplatingEngine
         }
     }
 
-    private Template ParseFile(string fullPath)
+    private static Template ParseFile(string fullPath, int maxNestingDepth)
     {
         Interlocked.Increment(ref _parseCount);
         var text = File.ReadAllText(fullPath);
-        var template = TemplateNesting.Parse(text, _options.MaxNestingDepth);
+        var template = TemplateNesting.Parse(text, maxNestingDepth);
         // Defence in depth, no test can observe it: render isolation comes from the per-render Context (tested in RenderIsolationTests). Without this
         // call the cached template would keep a reference to the last render's registers and assigns.
         template.MakeThreadSafe();

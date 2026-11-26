@@ -364,14 +364,47 @@ class PinFormTests(unittest.TestCase):
         with self.assertRaises(release_guards.GuardError):
             release_guards.check_pins_match_release_kind(repo, True)
 
-    def test_stable_property_pin_and_unknown_property_pass(self):
-        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" /><PackageVersion Include="B" Version="$(Unknown)" />', "<CoreVersion>10.0.1</CoreVersion>"), False)
+    def test_stable_property_pin_passes(self):
+        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" />', "<CoreVersion>10.0.1</CoreVersion>"), False)
+
+    def test_an_unresolved_property_blocks_a_stable_tag_but_not_a_prerelease_tag(self):
+        repo = self._repo('<PackageVersion Include="B" Version="$(Unknown)" />')
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(repo, False)
+        release_guards.check_pins_match_release_kind(repo, True)
+
+    def test_a_later_or_conditional_declaration_is_checked_too(self):
+        properties = "<CoreVersion>10.0.1</CoreVersion><CoreVersion Condition=\"'$(Configuration)' == 'Release'\">11.0.0-rc.3</CoreVersion>"
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" />', properties), False)
+        local = "<CoreVersion>10.0.1</CoreVersion><CoreVersion Condition=\"'$(CI)' == 'true'\">10.0.1-LOCAL.7</CoreVersion>"
+        for prerelease in (False, True):
+            with self.assertRaises(release_guards.GuardError):
+                release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(CoreVersion)" />', local), prerelease)
+
+    def test_any_semver_label_is_a_prerelease_in_any_case(self):
+        for version in ("10.0.1-Beta.2", "10.0.1-PREVIEW.1", "10.0.1-nightly.20261126", "10.0.1-x"):
+            with self.subTest(version=version):
+                with self.assertRaises(release_guards.GuardError):
+                    release_guards.check_pins_match_release_kind(self._repo(f'<PackageVersion Include="A" Version="{version}" />'), False)
+        release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="[10.0.1, 11.0.0)" />'), False)
+
+    def test_an_oversized_resolution_is_not_silently_accepted(self):
+        big = "x" * 3000
+        properties = f"<A>{big}$(B)</A><B>{big}</B>"
+        with self.assertRaises(release_guards.GuardError):
+            release_guards.check_pins_match_release_kind(self._repo('<PackageVersion Include="A" Version="$(A)" />', properties), False)
+
+    def test_expand_properties_covers_every_declared_value_and_caps_the_candidates(self):
+        self.assertEqual({"1", "2"}, set(release_guards.expand_properties("$(P)", {"P": ["1", "2"]})))
+        many = {"P": [str(i) for i in range(50)]}
+        self.assertLessEqual(len(release_guards.expand_properties("$(P)-$(P)-$(P)", many)), release_guards.MAX_CANDIDATES)
 
     def test_prerelease_tag_accepts_prerelease_pins_in_every_form(self):
         release_guards.check_pins_match_release_kind(self._repo("<PackageVersion Include='A' Version='11.0.0-rc.3' />"), True)
 
     def test_resolve_properties_stops_on_a_cycle(self):
-        self.assertEqual(release_guards.resolve_properties("$(A)", {"A": "$(B)", "B": "$(A)"}), "$(A)")
+        self.assertTrue(all("$(" in value for value in release_guards.expand_properties("$(A)", {"A": ["$(B)"], "B": ["$(A)"]})))
 
 
 class AssertPackagesTests(unittest.TestCase):

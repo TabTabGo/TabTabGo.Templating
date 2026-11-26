@@ -109,6 +109,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
                 || !TryLink(Path.Combine(_root, "_l2.liquid"), Path.Combine("..", Path.GetFileName(secret)), directory: false)
                 || !TryLink(Path.Combine(_root, "_l1.liquid"), Path.Combine("a", "b", "c", "sub", "_l2.liquid"), directory: false))
             {
+                Assert.Skip("symbolic links cannot be created here (platform or account)");
                 return;
             }
 
@@ -126,6 +127,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     {
         if (!TryLink(Path.Combine(_root, "_dangling.liquid"), "nonexistent.liquid", directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -141,6 +143,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         if (OperatingSystem.IsWindows())
         {
             Assert.Skip("needs POSIX file permissions (Windows)");
+            return;
         }
 
         var path = Path.Combine(_root, "_locked.liquid");
@@ -151,6 +154,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
             if (Environment.UserName == "root")
             {
                 Assert.Skip("running as root: root reads every file, so the permission failure cannot be produced");
+                return;
             }
 
             var ex = Assert.Throws<FileSystemException>(() => new EnhancedLocalFileSystem(_root).ReadTemplateFile(new Context(System.Globalization.CultureInfo.InvariantCulture), "'locked'"));
@@ -167,6 +171,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     {
         if (!TryLink(Path.Combine(_root, "sub", "_alias.liquid"), Path.Combine("..", "_part.liquid"), directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -327,6 +332,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         File.WriteAllText(regular, string.Empty);
         if (!TryMakeFifo(fifo))
         {
+            Assert.Skip("named pipes (mkfifo) are not available here");
             return;
         }
 
@@ -356,6 +362,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
     {
         if (!TryLink(Path.Combine(_root, "_loop1.liquid"), "_loop2.liquid", directory: false) || !TryLink(Path.Combine(_root, "_loop2.liquid"), "_loop1.liquid", directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -372,6 +379,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
             var target = i == 39 ? "_part.liquid" : "_hop" + (i + 1) + ".liquid";
             if (!TryLink(Path.Combine(_root, "_hop" + i + ".liquid"), target, directory: false))
             {
+                Assert.Skip("symbolic links cannot be created here (platform or account)");
                 return;
             }
         }
@@ -388,6 +396,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
             Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
+            return;
         }
 
         var locked = Path.Combine(_root, "locked");
@@ -395,6 +404,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         File.WriteAllText(Path.Combine(locked, "_inner.liquid"), "x");
         if (!TryLink(Path.Combine(_root, "_viadir.liquid"), Path.Combine("locked", "_inner.liquid"), directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -419,12 +429,14 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
             Assert.Skip("needs a non-Windows account that is not root (file permissions are not enforced)");
+            return;
         }
 
         var locked = Path.Combine(_root, "locked2");
         Directory.CreateDirectory(locked);
         if (!TryLink(Path.Combine(locked, "_gone.liquid"), "nowhere.liquid", directory: false))
         {
+            Assert.Skip("symbolic links cannot be created here (platform or account)");
             return;
         }
 
@@ -491,6 +503,7 @@ public sealed class EnhancedLocalFileSystemTests : IDisposable
             if (!TryLink(Path.Combine(_root, "_out.liquid"), Path.Combine("..", Path.GetFileName(outside)), directory: false))
             {
                 Assert.Skip("this platform or account cannot create symbolic links");
+                return;
             }
 
             var ex = Assert.Throws<FileSystemException>(() => Read(new EnhancedLocalFileSystem(relative), "out"));
